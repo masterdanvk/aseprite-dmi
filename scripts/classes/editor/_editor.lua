@@ -1,3 +1,5 @@
+------------------- EDITOR -------------------
+
 --- Editor is a class representing a DMI editor.
 --- It provides functionality for editing DMI files.
 --- @class Editor
@@ -23,6 +25,8 @@
 --- @field loading boolean Whether the editor is currently loading a file.
 --- @field modified boolean Whether a state has been modified.
 --- @field closed boolean Whether the editor has been closed.
+--- @field spritesheet_mode boolean Whether we're in spritesheet editing mode.
+--- @field spritesheet_sprite Sprite|nil The sprite object for spritesheet editing.
 Editor = {}
 Editor.__index = Editor
 
@@ -51,6 +55,10 @@ function Editor.new(title, dmi)
 	self.context_widget   = nil
 	self.save_path        = nil
 	self.open_path        = is_filename and dmi --[[@as string]] or nil
+
+    -- Initialize spritesheet mode properties
+    self.spritesheet_mode = false
+    self.spritesheet_sprite = nil
 
 	self.canvas_width     = 185
 	self.canvas_height    = 215
@@ -84,6 +92,13 @@ function Editor:new_dialog(title)
 		onclose = function() self:close(true) end
 	}
 
+    -- Add the View Mode toggle button
+    self.dialog:button {
+        id = "toggle_view",
+        text = "View Spritesheet",
+        onclick = function() self:toggle_view_mode() end
+    }
+
 	self.dialog:canvas {
 		width = self.canvas_width,
 		height = self.canvas_height,
@@ -100,125 +115,66 @@ function Editor:new_dialog(title)
 	}
 end
 
---- Displays a warning dialog asking the user to save changes to the sprite before closing.
---- @return 0|1|2 result 0 if the user cancels the operation, 1 if the user saves the file, 2 if the user doesn't save the file.
-function Editor:save_warning()
-	local result = 0
-
-	local dialog = Dialog {
-		title = "DMI Editor - Warning",
-	}
-
-	dialog:label {
-		text = "Save changes to the DMI",
-		focus = true
-	}
-
-	dialog:newrow()
-
-	dialog:label {
-		text = '"' .. app.fs.fileName(self:path()) .. '" before closing?',
-	}
-
-	dialog:canvas { height = 1 }
-
-	dialog:button {
-		text = "&Save",
-		focus = true,
-		onclick = function()
-			if self:save() then
-				result = 1
-				dialog:close()
-			end
-		end
-	}
-
-	dialog:button {
-		text = "Do&n't Save",
-		onclick = function()
-			result = 2
-			dialog:close()
-		end
-	}
-
-	dialog:button {
-		text = "&Cancel",
-		onclick = function()
-			dialog:close()
-		end
-	}
-
-	dialog:show()
-
-	return result
+--- Toggles between state view and spritesheet view modes
+function Editor:toggle_view_mode()
+    if not self.dmi then return end
+    
+    -- Save any pending changes in the current mode
+    if self.spritesheet_mode then
+        -- Coming from spritesheet mode back to state mode
+        -- Apply any changes made to the spritesheet back to the states
+        self:apply_spritesheet_changes()
+    else
+        -- Going from state mode to spritesheet mode
+        -- Save any open state sprites
+        for _, state_sprite in ipairs(self.open_sprites) do
+            if state_sprite.sprite.isModified then
+                state_sprite:save()
+            end
+        end
+    end
+    
+    -- Toggle the mode
+    self.spritesheet_mode = not self.spritesheet_mode
+    
+    if self.spritesheet_mode then
+        -- Enter spritesheet mode
+        self:enter_spritesheet_mode()
+    else
+        -- Return to state mode
+        self:exit_spritesheet_mode()
+    end
+    
+    -- Update the button text
+    self.dialog:modify {
+        id = "toggle_view",
+        text = self.spritesheet_mode and "View States" or "View Spritesheet"
+    }
+    
+    -- Update the view
+    self:repaint_states()
 end
 
---- Function to handle the "onclose" event of the Editor class.
---- Cleans up resources and closes sprites when the editor is closed.
---- @param event boolean True if the event is triggered by the user closing the dialog, false otherwise.
---- @param force? boolean True if the editor should be closed without asking the user to save changes, false otherwise.
---- @return boolean closed Whether the editor has been closed.
-function Editor:close(event, force)
-	if self.closed then
-		return true
-	end
-
-	if self:is_modified() and not force then
-		if event then
-			local bounds = self.dialog.bounds
-			self:new_dialog(self.title)
-			self.dialog:show { wait = false, bounds = bounds }
-		end
-
-		for _, state_sprite in ipairs(self.open_sprites) do
-			if state_sprite.sprite.isModified then
-				if state_sprite:save_warning() == 0 then
-					return false
-				end
-			end
-		end
-
-		if self.modified and self:save_warning() == 0 then
-			return false
-		end
-	end
-
-	self.closed = true
-	self.dialog:close()
-
-	for i, editor in ipairs(open_editors) do
-		if editor == self then
-			table.remove(open_editors, i)
-			break
-		end
-	end
-
-	if self.dmi then
-		libdmi.remove_dir(self.dmi.temp, false)
-	end
-
-	for _, state_sprite in ipairs(self.open_sprites) do
-		if state_sprite.sprite then
-			state_sprite.sprite:close()
-		end
-	end
-
-	app.events:off(self.beforecommand)
-	app.events:off(self.aftercommand)
-
-	self.mouse = nil
-	self.focused_widget = nil
-	self.dialog = nil
-	self.widgets = nil
-	self.dmi = nil
-	self.open_sprites = nil
-	self.beforecommand = nil
-	self.aftercommand = nil
-
-	return true
+--- Enter spritesheet editing mode
+function Editor:enter_spritesheet_mode()
+    if not self.dmi then return end
+    
+    -- Create a spritesheet sprite from all the states
+    self.spritesheet_sprite = self:create_spritesheet()
 end
 
---- Shows the editor dialog.
+--- Exit spritesheet editing mode and return to state view
+function Editor:exit_spritesheet_mode()
+    if not self.dmi or not self.spritesheet_sprite then return end
+    
+    -- Clean up the spritesheet sprite
+    self.spritesheet_sprite = nil
+    
+    -- Update the state view
+    self:repaint_states()
+end
+
+--- Displays the editor dialog.
 function Editor:show()
 	self.dialog:show { wait = false }
 end
@@ -241,6 +197,11 @@ function Editor:open_file(dmi)
 	self.widgets = {}
 	self.open_sprites = {}
 	self.save_path = nil
+    self.spritesheet_mode = false
+    if self.spritesheet_sprite then
+        self.spritesheet_sprite:close()
+        self.spritesheet_sprite = nil
+    end
 
 	self:repaint()
 
@@ -270,6 +231,11 @@ end
 --- @return boolean success Whether the DMI file has been saved. May still return true even if the file has not been saved successfully.
 function Editor:save(no_dialog)
 	if not self.dmi then return false end
+
+    -- If in spritesheet mode, apply changes back to states first
+    if self.spritesheet_mode and self.spritesheet_sprite then
+        self:apply_spritesheet_changes()
+    end
 
 	local path = self:path()
 	local filename = path
@@ -372,11 +338,18 @@ end
 --- @return boolean modified Whether the DMI file has been modified.
 function Editor:is_modified()
 	if self.modified then return true end
+	
 	for _, state_sprite in ipairs(self.open_sprites) do
 		if state_sprite.sprite.isModified then
 			return true
 		end
 	end
+	
+	-- Also check spritesheet modifications
+    if self.spritesheet_mode and self.spritesheet_sprite and self.spritesheet_sprite.isModified then
+        return true
+    end
+	
 	return false
 end
 
@@ -389,4 +362,128 @@ function Editor.is_sprite_open(sprite)
 		end
 	end
 	return false
+end
+
+--- Function to handle the "onclose" event of the Editor class.
+--- Cleans up resources and closes sprites when the editor is closed.
+--- @param event boolean True if the event is triggered by the user closing the dialog, false otherwise.
+--- @param force? boolean True if the editor should be closed without asking the user to save changes, false otherwise.
+--- @return boolean closed Whether the editor has been closed.
+function Editor:close(event, force)
+	if self.closed then
+		return true
+	end
+
+	if self:is_modified() and not force then
+		if event then
+			local bounds = self.dialog.bounds
+			self:new_dialog(self.title)
+			self.dialog:show { wait = false, bounds = bounds }
+		end
+
+		for _, state_sprite in ipairs(self.open_sprites) do
+			if state_sprite.sprite.isModified then
+				if state_sprite:save_warning() == 0 then
+					return false
+				end
+			end
+		end
+
+		if self.modified and self:save_warning() == 0 then
+			return false
+		end
+	end
+
+	self.closed = true
+	self.dialog:close()
+
+	for i, editor in ipairs(open_editors) do
+		if editor == self then
+			table.remove(open_editors, i)
+			break
+		end
+	end
+
+	if self.dmi then
+		libdmi.remove_dir(self.dmi.temp, false)
+	end
+
+	for _, state_sprite in ipairs(self.open_sprites) do
+		if state_sprite.sprite then
+			state_sprite.sprite:close()
+		end
+	end
+	
+	-- Clean up spritesheet resources if needed
+    if self.spritesheet_sprite then
+        self.spritesheet_sprite:close()
+        self.spritesheet_sprite = nil
+    end
+
+	app.events:off(self.beforecommand)
+	app.events:off(self.aftercommand)
+
+	self.mouse = nil
+	self.focused_widget = nil
+	self.dialog = nil
+	self.widgets = nil
+	self.dmi = nil
+	self.open_sprites = nil
+	self.beforecommand = nil
+	self.aftercommand = nil
+
+	return true
+end
+
+--- Displays a warning dialog asking the user to save changes to the sprite before closing.
+--- @return 0|1|2 result 0 if the user cancels the operation, 1 if the user saves the file, 2 if the user doesn't save the file.
+function Editor:save_warning()
+	local result = 0
+
+	local dialog = Dialog {
+		title = "DMI Editor - Warning",
+	}
+
+	dialog:label {
+		text = "Save changes to the DMI",
+		focus = true
+	}
+
+	dialog:newrow()
+
+	dialog:label {
+		text = '"' .. app.fs.fileName(self:path()) .. '" before closing?',
+	}
+
+	dialog:canvas { height = 1 }
+
+	dialog:button {
+		text = "&Save",
+		focus = true,
+		onclick = function()
+			if self:save() then
+				result = 1
+				dialog:close()
+			end
+		end
+	}
+
+	dialog:button {
+		text = "Do&n't Save",
+		onclick = function()
+			result = 2
+			dialog:close()
+		end
+	}
+
+	dialog:button {
+		text = "&Cancel",
+		onclick = function()
+			dialog:close()
+		end
+	}
+
+	dialog:show()
+
+	return result
 end

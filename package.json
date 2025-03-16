@@ -1,11 +1,11 @@
 {
-	"name": "asprite-dmi",
-	"displayName": "DMI Editor",
-	"description": "DMI Editor Extension for Aseprite",
-	"version": "1.1.0",
+	"name": "asprite-dmi-MD",
+	"displayName": "DMI Editor MD Fork",
+	"description": "DMI Editor Extension for Aseprite with enhanced features for spritesheet editing",
+	"version": "1.2.0MD",
 	"contributors": [
 		{
-			"name": "Seefaaa",
+			"name": "Seefaaa, Masterdan",
 			"url": "https://github.com/Seefaaa"
 		},
 		{
@@ -29,6 +29,7 @@
 			{ "path": "./scripts/functions/string.lua" },
 			{ "path": "./scripts/functions/table.lua" },
 			{ "path": "./scripts/constants.lua" },
+			{ "path": "./scripts/mdfunctions.lua" },
 			{ "path": "./scripts/main.lua" }
 		]
 	}

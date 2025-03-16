@@ -1098,3 +1098,57 @@ function Editor:split_state(state)
 	self:remove_state(state)
 	self:repaint_states()
 end
+--- Opens the entire DMI file as a spritesheet for direct editing
+function Editor:edit_spritesheet()
+    if not self.dmi then return end
+    
+    -- Save any pending changes
+    if self:is_modified() then
+        local result = self:save_warning()
+        if result == 0 then -- User canceled
+            return
+        end
+    end
+    
+    -- Get the full path of the current DMI file
+    local dmiPath = self:path()
+    
+    -- Important: Set the global flag before doing anything else
+    -- This needs to be a global variable, not just a local in Editor
+    _G.opening_dmi_noeditor = true
+    
+    -- Close the editor window without triggering save dialogs again
+    self.closed = true
+    self.dialog:close()
+    
+    for i, editor in ipairs(open_editors) do
+        if editor == self then
+            table.remove(open_editors, i)
+            break
+        end
+    end
+    
+    -- Close any current file
+    if app.sprite then
+        app.command.CloseFile { ui = false }
+    end
+    
+    -- Open the file directly using the direct Aseprite command
+    app.command.OpenFile { filename = dmiPath }
+    
+    -- Add metadata to the opened sprite
+    if app.sprite then
+        -- Set the data property
+        app.sprite.data = app.sprite.data .. ";dmi_spritesheet=true;dmi_source=" .. dmiPath
+        
+        -- Display a helpful message
+        app.alert {
+            title = "DMI Spritesheet Mode",
+            text = {
+                "You are now editing the entire DMI as a spritesheet.",
+                "When finished, use 'File > DMI Editor > Save Spritesheet as DMI'",
+                "to preserve all state metadata."
+            }
+        }
+    end
+end

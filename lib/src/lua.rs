@@ -29,10 +29,94 @@ fn module(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set("open_repo", lua.create_function(safe!(open_repo))?)?;
     exports.set("instances", lua.create_function(instances)?)?;
     exports.set("save_dialog", lua.create_function(safe!(save_dialog))?)?;
+    exports.set("merge_spritesheet", lua.create_function(safe!(merge_spritesheet))?)?;
 
     Ok(exports)
 }
 
+/// Merges a PNG file with DMI metadata from an original DMI file and saves it as a new DMI file.
+/// This allows for editing DMI files as spritesheets while preserving metadata.
+/// 
+/// # Arguments
+/// * `png_path` - Path to the edited PNG file (spritesheet)
+/// * `dmi_path` - Path to the original DMI file (for metadata extraction)
+/// * `output_path` - Path where to save the resulting DMI file
+fn merge_spritesheet(
+    _: &Lua,
+    (png_path, dmi_path, output_path): (String, String, String),
+) -> LuaResult<bool> {
+    // Verify input files exist
+    if !Path::new(&png_path).exists() {
+        return Err(LuaError::external(format!("PNG file does not exist: {}", png_path)));
+    }
+    
+    if !Path::new(&dmi_path).exists() {
+        return Err(LuaError::external(format!("DMI file does not exist: {}", dmi_path)));
+    }
+    
+    // Read both files into memory
+    let png_data = std::fs::read(&png_path)
+        .map_err(|e| LuaError::external(format!("Failed to read PNG file: {}", e)))?;
+    
+    let dmi_data = std::fs::read(&dmi_path)
+        .map_err(|e| LuaError::external(format!("Failed to read DMI file: {}", e)))?;
+    
+    // Find the zTXt chunk in the DMI file
+    let mut ztxt_pos = None;
+    let mut ztxt_length = 0;
+    
+    for i in 0..dmi_data.len() - 8 {
+        if &dmi_data[i+4..i+8] == b"zTXt" {
+            // Extract the length (big-endian u32)
+            let length = ((dmi_data[i] as u32) << 24) |
+                         ((dmi_data[i+1] as u32) << 16) |
+                         ((dmi_data[i+2] as u32) << 8) |
+                         (dmi_data[i+3] as u32);
+            
+            ztxt_pos = Some(i);
+            ztxt_length = length as usize + 12; // length + chunk type (4) + length field (4) + CRC (4)
+            break;
+        }
+    }
+    
+    let ztxt_chunk = match ztxt_pos {
+        Some(pos) => &dmi_data[pos..pos + ztxt_length],
+        None => return Err(LuaError::external("Could not find DMI metadata in the file")),
+    };
+    
+    // Find the IDAT chunk in the PNG file
+    let mut idat_pos = None;
+    
+    for i in 0..png_data.len() - 8 {
+        if &png_data[i+4..i+8] == b"IDAT" {
+            idat_pos = Some(i);
+            break;
+        }
+    }
+    
+    let idat_pos = match idat_pos {
+        Some(pos) => pos,
+        None => return Err(LuaError::external("Could not find IDAT chunk in PNG file")),
+    };
+    
+    // Merge the files
+    let mut output_data = Vec::with_capacity(png_data.len() + ztxt_length);
+    
+    // PNG header and chunks before IDAT
+    output_data.extend_from_slice(&png_data[0..idat_pos]);
+    
+    // Insert the zTXt chunk
+    output_data.extend_from_slice(ztxt_chunk);
+    
+    // Rest of the PNG file
+    output_data.extend_from_slice(&png_data[idat_pos..]);
+    
+    // Write the output file
+    match std::fs::write(&output_path, output_data) {
+        Ok(_) => Ok(true),
+        Err(e) => Err(LuaError::external(format!("Failed to write output file: {}", e))),
+    }
+}
 fn new_file(
     lua: &Lua,
     (name, width, height, temp): (String, u32, u32, String),

@@ -11,36 +11,43 @@ end
 --- This function is called when the editor needs to repaint its contents.
 --- @param ctx GraphicsContext The drawing context used to draw on the editor canvas.
 function Editor:onpaint(ctx)
-	if self.loading then
-		local size = ctx:measureText("Loading file...")
-		ctx.color = app.theme.color.text
-		ctx:fillText("Loading file...", (ctx.width - size.width) / 2, (ctx.height - size.height) / 2)
-		return
-	end
+    if self.loading then
+        local size = ctx:measureText("Loading file...")
+        ctx.color = app.theme.color.text
+        ctx:fillText("Loading file...", (ctx.width - size.width) / 2, (ctx.height - size.height) / 2)
+        return
+    end
 
-	local min_width = self.dmi and (self.dmi.width + BOX_PADDING) or 1
-	local min_height = self.dmi and (self.dmi.height + BOX_BORDER + BOX_PADDING * 2 + TEXT_HEIGHT) or 1
+    local min_width = self.dmi and (self.dmi.width + BOX_PADDING) or 1
+    local min_height = self.dmi and (self.dmi.height + BOX_BORDER + BOX_PADDING * 2 + TEXT_HEIGHT) or 1
 
-	self.canvas_width = math.max(ctx.width, min_width)
-	self.canvas_height = math.max(ctx.height, min_height)
+    self.canvas_width = math.max(ctx.width, min_width)
+    self.canvas_height = math.max(ctx.height, min_height)
 
-	if TEXT_HEIGHT == 0 then
-		TEXT_HEIGHT = ctx:measureText("A").height
-	end
+    if TEXT_HEIGHT == 0 then
+        TEXT_HEIGHT = ctx:measureText("A").height
+    end
 
-	if CONTEXT_BUTTON_HEIGHT == 0 then
-		CONTEXT_BUTTON_HEIGHT = TEXT_HEIGHT + BOX_PADDING * 2
-	end
+    if CONTEXT_BUTTON_HEIGHT == 0 then
+        CONTEXT_BUTTON_HEIGHT = TEXT_HEIGHT + BOX_PADDING * 2
+    end
 
-	local max_row = self.dmi and math.floor(self.canvas_width / min_width) or 1
-	local max_column = self.dmi and math.floor(self.canvas_height / min_height) or 1
+    local max_row = self.dmi and math.floor(self.canvas_width / min_width) or 1
+    local max_column = self.dmi and math.floor(self.canvas_height / min_height) or 1
 
-	if max_row ~= self.max_in_a_row or max_column ~= self.max_in_a_column then
-		self.max_in_a_row = math.max(max_row, 1)
-		self.max_in_a_column = math.max(max_column, 1)
-		self:repaint_states()
-		return
-	end
+    if max_row ~= self.max_in_a_row or max_column ~= self.max_in_a_column then
+        self.max_in_a_row = math.max(max_row, 1)
+        self.max_in_a_column = math.max(max_column, 1)
+        self:repaint_states()
+        return
+    end
+
+    -- Check if we're in spritesheet mode and render accordingly
+    if self.spritesheet_mode and self.spritesheet_sprite then
+        self:render_spritesheet(ctx)
+        return
+    end
+	
 
 	local hovers = {} --[[ @as (string)[] ]]
 	for _, widget in ipairs(self.widgets) do

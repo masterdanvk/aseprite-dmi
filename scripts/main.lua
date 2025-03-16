@@ -22,7 +22,13 @@ libdmi = nil
 --- Tracks if we're doing a no-editor DMI open
 local opening_dmi_noeditor = false
 
+--- MDFunctions module for enhanced features
+local MDFunctions = nil
+function reset_dmi_noeditor_flag()
+    opening_dmi_noeditor = false
+end
 --- Initializes the plugin. Called when the plugin is loaded.
+
 --- @param plugin Plugin The plugin object.
 function init(plugin)
 	if app.apiVersion < 27 then
@@ -33,26 +39,36 @@ function init(plugin)
 		return
 	end
 
+	-- Load MDFunctions module
+	if not MDFunctions and app.isUIAvailable then
+        	MDFunctions = dofile(app.fs.joinPath(plugin.path, "scripts", "mdfunctions.lua"))
+	end
+
 	-- Initialize Preferences
 	Preferences.initialize(plugin)
 
-	after_listener = app.events:on("aftercommand", function(ev)
-		if ev.name == "OpenFile" then
-			-- Skip DMI editor if coming from Raw Open command
-			if app.sprite and app.sprite.filename:ends_with(".dmi") and not opening_dmi_noeditor then
-				local filename = app.sprite.filename
-				app.command.CloseFile { ui = false }
+after_listener = app.events:on("aftercommand", function(ev)
+    if ev.name == "OpenFile" then
+        -- Debug message to help troubleshoot
+        print("OpenFile event: " .. (app.sprite and app.sprite.filename or "No sprite") .. 
+              ", opening_dmi_noeditor: " .. tostring(_G.opening_dmi_noeditor or false))
+        
+        -- Skip DMI editor if coming from Raw Open command or Edit as Spritesheet
+        if app.sprite and app.sprite.filename:ends_with(".dmi") and not (_G.opening_dmi_noeditor or false) then
+            local filename = app.sprite.filename
+            app.command.CloseFile { ui = false }
 
-				loadlib(plugin.path)
+            loadlib(plugin.path)
 
-				Editor.new(DIALOG_NAME, filename)
-			end
-			-- Reset the flag after handling the OpenFile event
-			opening_dmi_noeditor = false
-		elseif ev.name == "Exit" then
-			exiting = true
-		end
-	end)
+            Editor.new(DIALOG_NAME, filename)
+        end
+        
+        -- Reset the flag
+        _G.opening_dmi_noeditor = false
+    elseif ev.name == "Exit" then
+        exiting = true
+    end
+end)
 
 	before_listener = app.events:on("beforecommand", function(ev)
 		if ev.name == "Exit" then
@@ -101,10 +117,20 @@ function init(plugin)
 
 	plugin:newCommand {
 		id = "dmi_raw_open",
-		title = "ADVANCED: Open DMI as Spritesheet (Won't save DMI metadata!)",
+		title = "Open DMI (No Editor - Will Delete DMI Metadata!!)",
 		group = "dmi_editor",
 		onclick = function()
 			opening_dmi_noeditor = true
+			app.command.OpenFile()
+		end,
+	}
+
+	plugin:newCommand {
+		id = "dmi_open_spritesheet",
+		title = "Open DMI as Spritesheet",
+		group = "dmi_editor",
+		onclick = function()
+			opening_dmi_noeditor = true  -- Prevent regular DMI Editor from opening
 			app.command.OpenFile()
 		end,
 	}
@@ -155,6 +181,77 @@ function init(plugin)
 		end,
 		onenabled = function()
 			return is_state_sprite() and true or false
+		end,
+	}
+
+	plugin:newMenuSeparator {
+		group = "dmi_editor",
+	}
+	
+	plugin:newCommand {
+		id = "dmi_mirror_east_to_west",
+		title = "Mirror East to West",
+		group = "dmi_editor",
+		onclick = function()
+			if app.sprite then
+				loadlib(plugin.path)
+				MDFunctions.mirrorEastToWest(app.sprite)
+			else
+				app.alert("No sprite is currently open")
+			end
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
+		end,
+	}
+	
+	plugin:newCommand {
+		id = "dmi_delete_west_frames",
+		title = "Delete West Frames",
+		group = "dmi_editor",
+		onclick = function()
+			if app.sprite then
+				loadlib(plugin.path)
+				MDFunctions.deleteWestFrames(app.sprite)
+			else
+				app.alert("No sprite is currently open")
+			end
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
+		end,
+	}
+	
+	plugin:newCommand {
+		id = "dmi_save_spritesheet",
+		title = "Save Spritesheet as DMI",
+		group = "dmi_editor",
+		onclick = function()
+			if app.sprite then
+				loadlib(plugin.path)
+				
+				-- Ask for save location
+				local dlg = Dialog("Save DMI")
+				dlg:file {
+					id = "file",
+					label = "Save As:",
+					filename = app.sprite.filename:ends_with(".dmi") and app.sprite.filename or app.fs.filePath(app.sprite.filename) .. app.fs.fileTitle(app.sprite.filename) .. ".dmi",
+					filetypes = { "dmi" },
+					save = true
+				}
+				dlg:button { id = "ok", text = "OK" }
+				dlg:button { id = "cancel", text = "Cancel" }
+				dlg:show()
+				
+				if dlg.data.ok and dlg.data.file ~= "" then
+					MDFunctions.saveSpritesheet(app.sprite, dlg.data.file)
+				end
+			else
+				app.alert("No spritesheet is currently open")
+			end
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
 		end,
 	}
 
