@@ -19,7 +19,6 @@ local function dbgMsg(msg)
         app.alert("DEBUG: " .. msg)
     end
 end
--- Add this helper function to MDFunctions module:
 
 --- Forces a refresh of the sprite display
 --- @param sprite Sprite The sprite to refresh
@@ -47,7 +46,6 @@ function MDFunctions.refreshDisplay(sprite)
     -- Final refresh
     app.refresh()
 end
-
 
 --- Safely clean up a temporary file
 --- @param filepath string Path to file to clean up
@@ -510,10 +508,9 @@ function MDFunctions.mirrorEastToWest(sprite, cellWidth, cellHeight, activeFrame
         end
     end)
     
-    -- Report results
     if totalProcessed > 0 then
         app.alert("Mirrored " .. totalProcessed .. " east-facing sprites to west-facing positions")
-	MDFunctions.refreshDisplay(sprite)
+        MDFunctions.refreshDisplay(sprite)
         return true
     else
         app.alert("No east-facing sprites were found to process")
@@ -664,10 +661,9 @@ function MDFunctions.mirrorEastToWestSpritesheet(sprite)
         end
     end)
     
-    -- Report results
     if totalProcessed > 0 then
         app.alert("Mirrored " .. totalProcessed .. " east-facing sprites to west-facing positions")
-	MDFunctions.refreshDisplay(sprite)
+        MDFunctions.refreshDisplay(sprite)
         return true
     else
         app.alert("No east-facing sprites were found to process")
@@ -826,10 +822,9 @@ function MDFunctions.deleteWestFrames(sprite, cellWidth, cellHeight, activeFrame
         end
     end)
     
-    -- Report results
     if totalDeleted > 0 then
         app.alert("Deleted " .. totalDeleted .. " west-facing frames")
-	MDFunctions.refreshDisplay(sprite)
+        MDFunctions.refreshDisplay(sprite)
         return true
     else
         app.alert("No west-facing frames were found to delete")
@@ -954,10 +949,9 @@ function MDFunctions.deleteWestFramesSpritesheet(sprite)
         end
     end)
     
-    -- Report results
     if totalDeleted > 0 then
         app.alert("Deleted " .. totalDeleted .. " west-facing frames")
-	MDFunctions.refreshDisplay(sprite)
+        MDFunctions.refreshDisplay(sprite)
         return true
     else
         app.alert("No west-facing frames were found to delete")

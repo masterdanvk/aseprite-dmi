@@ -123,12 +123,19 @@ function Editor:toggle_view_mode()
     if self.spritesheet_mode then
         -- Coming from spritesheet mode back to state mode
         -- Apply any changes made to the spritesheet back to the states
-        self:apply_spritesheet_changes()
+        if self.spritesheet_sprite then
+            -- Only apply changes if the sprite exists
+            self:apply_spritesheet_changes()
+            
+            -- Clean up the spritesheet sprite (we're about to exit spritesheet mode)
+            -- No need to try setting isModified, just close it
+            self.spritesheet_sprite = nil
+        end
     else
         -- Going from state mode to spritesheet mode
         -- Save any open state sprites
         for _, state_sprite in ipairs(self.open_sprites) do
-            if state_sprite.sprite.isModified then
+            if state_sprite.sprite and state_sprite.sprite.isModified then
                 state_sprite:save()
             end
         end
@@ -141,7 +148,7 @@ function Editor:toggle_view_mode()
         -- Enter spritesheet mode
         self:enter_spritesheet_mode()
     else
-        -- Return to state mode
+        -- Return to state mode - sprite cleanup already done above
         self:exit_spritesheet_mode()
     end
     
@@ -154,7 +161,6 @@ function Editor:toggle_view_mode()
     -- Update the view
     self:repaint_states()
 end
-
 --- Enter spritesheet editing mode
 function Editor:enter_spritesheet_mode()
     if not self.dmi then return end
@@ -165,9 +171,8 @@ end
 
 --- Exit spritesheet editing mode and return to state view
 function Editor:exit_spritesheet_mode()
-    if not self.dmi or not self.spritesheet_sprite then return end
-    
-    -- Clean up the spritesheet sprite
+    -- We already applied changes in toggle_view_mode
+    -- Here we just need to make sure we've cleaned up properly
     self.spritesheet_sprite = nil
     
     -- Update the state view

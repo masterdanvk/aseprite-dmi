@@ -24,9 +24,11 @@ local opening_dmi_noeditor = false
 
 --- MDFunctions module for enhanced features
 local MDFunctions = nil
+
 function reset_dmi_noeditor_flag()
     opening_dmi_noeditor = false
 end
+
 --- Initializes the plugin. Called when the plugin is loaded.
 
 --- @param plugin Plugin The plugin object.

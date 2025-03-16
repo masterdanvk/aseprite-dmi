@@ -1099,6 +1099,266 @@ function Editor:split_state(state)
 	self:repaint_states()
 end
 --- Opens the entire DMI file as a spritesheet for direct editing
+--- Function to create a spritesheet from all states
+function Editor:create_spritesheet()
+    if not self.dmi then return nil end
+    
+    -- Calculate total frames and grid size
+    local total_frames = 0
+    for _, state in ipairs(self.dmi.states) do
+        total_frames = total_frames + (state.frame_count * state.dirs)
+    end
+    
+    -- Calculate grid dimensions for a roughly square arrangement
+    local grid_size = math.ceil(math.sqrt(total_frames))
+    local width = grid_size * self.dmi.width
+    local height = math.ceil(total_frames / grid_size) * self.dmi.height
+    
+    -- Debug output
+    print("Creating spritesheet with dimensions: " .. width .. "x" .. height)
+    print("Total frames: " .. total_frames .. ", Grid size: " .. grid_size)
+    
+    -- Create a new sprite with all states
+    local sprite = Sprite(ImageSpec {
+        width = width,
+        height = height,
+        colorMode = ColorMode.RGB
+    })
+    
+    app.transaction("Create Spritesheet", function()
+        -- First, rename the default layer
+        if #sprite.layers > 0 then
+            sprite.layers[1].name = "States"
+        end
+        
+        -- If no layers exist, create the main layer
+        local mainLayer = nil
+        if #sprite.layers == 0 then
+            mainLayer = sprite:newLayer()
+            mainLayer.name = "States"
+        else
+            mainLayer = sprite.layers[1]
+        end
+        
+        -- Create a single large image containing all cells properly positioned
+        local compositeImage = Image(width, height, ColorMode.RGB)
+        compositeImage:clear() -- Make sure it's transparent
+        
+        -- Create a grid layer for reference
+        local grid_layer = sprite:newLayer()
+        grid_layer.name = "Grid"
+        grid_layer.opacity = 128
+        
+        -- Create a grid image
+        local gridImage = Image(width, height, ColorMode.RGB)
+        gridImage:clear() -- Make sure it's transparent
+        
+        -- Draw all states to the composite image
+        local index = 0
+        for stateIdx, state in ipairs(self.dmi.states) do
+            print("Processing state " .. stateIdx .. ": " .. state.name .. " (" .. state.frame_count .. " frames, " .. state.dirs .. " dirs)")
+            
+            for frame = 0, state.frame_count - 1 do
+                for dir = 0, state.dirs - 1 do
+                    local frame_index = frame * state.dirs + dir
+                    local path = app.fs.joinPath(self.dmi.temp, state.frame_key .. "." .. frame_index .. ".bytes")
+                    
+                    -- Make sure the file exists
+                    if not app.fs.isFile(path) then
+                        print("Warning: File not found: " .. path)
+                        goto continue
+                    end
+                    
+                    local cellImage = load_image_bytes(path)
+                    
+                    -- Calculate position in grid
+                    local col = index % grid_size
+                    local row = math.floor(index / grid_size)
+                    local x = col * self.dmi.width
+                    local y = row * self.dmi.height
+                    
+                    print("Placing frame at position: " .. x .. "," .. y .. " (index: " .. index .. ", col: " .. col .. ", row: " .. row .. ")")
+                    
+                    -- Draw the cell image onto the composite image at the correct position
+                    compositeImage:drawImage(cellImage, Point(x, y))
+                    
+                    -- Draw grid cell outline
+                    for i = 0, self.dmi.width - 1 do
+                        gridImage:putPixel(x + i, y, app.pixelColor.rgba(128, 128, 128, 128))
+                        gridImage:putPixel(x + i, y + self.dmi.height - 1, app.pixelColor.rgba(128, 128, 128, 128))
+                    end
+                    for i = 0, self.dmi.height - 1 do
+                        gridImage:putPixel(x, y + i, app.pixelColor.rgba(128, 128, 128, 128))
+                        gridImage:putPixel(x + self.dmi.width - 1, y + i, app.pixelColor.rgba(128, 128, 128, 128))
+                    end
+                    
+                    index = index + 1
+                    ::continue::
+                end
+            end
+        end
+        
+        -- Create a single cel with the composite image
+        sprite:newCel(mainLayer, 1, compositeImage, Point(0, 0))
+        
+        -- Create a single cel with the grid image
+        sprite:newCel(grid_layer, 1, gridImage, Point(0, 0))
+    end)
+    
+    -- Save the sprite with metadata to indicate it's a DMI spritesheet
+    sprite.data = sprite.data .. ";dmi_spritesheet=true;dmi_source=" .. self:path() .. ";grid_size=" .. grid_size
+    
+    -- Save the sprite to a temporary file so it can be reopened properly
+    local temp_path = app.fs.joinPath(app.fs.tempPath, TEMP_NAME, "spritesheet_temp.ase")
+    sprite:saveAs(temp_path)
+    
+    -- Ensure the display refreshes correctly
+    if MDFunctions and MDFunctions.refreshDisplay then
+        MDFunctions.refreshDisplay(sprite)
+    end
+    
+    -- Set view to show the entire spritesheet
+    app.command.FitScreen()
+    
+    return sprite
+end
+
+-- Applies changes from the spritesheet back to the individual states
+function Editor:apply_spritesheet_changes()
+    if not self.dmi or not self.spritesheet_sprite then return end
+    
+    -- Get the cell dimensions from sprite data or use default
+    local cellWidth = self.dmi.width
+    local cellHeight = self.dmi.height
+    
+    -- Get grid size from metadata or calculate it
+    local grid_size = nil
+    if self.spritesheet_sprite.data and self.spritesheet_sprite.data:find("grid_size=") then
+        local start = self.spritesheet_sprite.data:find("grid_size=") + 10
+        local endPos = self.spritesheet_sprite.data:find(";", start) or self.spritesheet_sprite.data:len() + 1
+        grid_size = tonumber(self.spritesheet_sprite.data:sub(start, endPos - 1))
+    end
+    
+    if not grid_size then
+        -- Calculate grid size
+        local total_frames = 0
+        for _, state in ipairs(self.dmi.states) do
+            total_frames = total_frames + (state.frame_count * state.dirs)
+        end
+        grid_size = math.ceil(math.sqrt(total_frames))
+    end
+    
+    -- Check if the spritesheet has been modified
+    -- Note: We can't directly check isModified since we're about to exit spritesheet mode
+    -- Just process the changes regardless
+    
+    -- Start a transaction to apply all changes at once
+    app.transaction("Apply Spritesheet Changes", function()
+        -- Find the "States" layer (the main content layer)
+        local mainLayer = nil
+        for _, l in ipairs(self.spritesheet_sprite.layers) do
+            if l.isVisible and l.name == "States" then
+                mainLayer = l
+                break
+            end
+        end
+        
+        -- If we couldn't find the "States" layer, try the first visible layer that's not the grid
+        if not mainLayer then
+            for _, l in ipairs(self.spritesheet_sprite.layers) do
+                if l.isVisible and l.name ~= "Grid" then
+                    mainLayer = l
+                    print("Using layer: " .. l.name .. " as the main content layer")
+                    break
+                end
+            end
+        end
+        
+        if not mainLayer then
+            app.alert("Could not find a suitable content layer in the spritesheet")
+            return
+        end
+        
+        -- Get the full image from the spritesheet
+        local fullImage = Image(self.spritesheet_sprite.width, self.spritesheet_sprite.height, ColorMode.RGB)
+        fullImage:clear()
+        
+        -- Get the current frame of the sprite
+        local frameNumber = app.activeFrame.frameNumber
+        
+        -- Draw the current frame of the spritesheet onto the full image
+        for _, cel in ipairs(mainLayer.cels) do
+            if cel.frameNumber == frameNumber then
+                fullImage:drawImage(cel.image, cel.position)
+                break -- Only need the first matching cel
+            end
+        end
+        
+        -- Process each state
+        local index = 0
+        for stateIdx, state in ipairs(self.dmi.states) do
+            print("Extracting state " .. stateIdx .. ": " .. state.name)
+            
+            -- For each frame and direction of this state
+            for frame = 0, state.frame_count - 1 do
+                for dir = 0, state.dirs - 1 do
+                    -- Calculate grid position
+                    local col = index % grid_size
+                    local row = math.floor(index / grid_size)
+                    
+                    -- Calculate pixel coordinates
+                    local x = col * cellWidth
+                    local y = row * cellHeight
+                    
+                    -- Make sure we're within the image bounds
+                    if x >= fullImage.width or y >= fullImage.height then
+                        print("Warning: Position out of bounds: " .. x .. "," .. y)
+                        goto continue
+                    end
+                    
+                    -- Extract the cell image from the spritesheet
+                    local cellImage = Image(cellWidth, cellHeight, ColorMode.RGB)
+                    cellImage:clear()
+                    
+                    -- Copy the pixels from the main image
+                    for py = 0, cellHeight - 1 do
+                        for px = 0, cellWidth - 1 do
+                            if x + px < fullImage.width and y + py < fullImage.height then
+                                local color = fullImage:getPixel(x + px, y + py)
+                                cellImage:putPixel(px, py, color)
+                            end
+                        end
+                    end
+                    
+                    -- Save the updated cell image back to the temporary directory
+                    local frameIndex = frame * state.dirs + dir
+                    local path = app.fs.joinPath(self.dmi.temp, state.frame_key .. "." .. frameIndex .. ".bytes")
+                    save_image_bytes(cellImage, path)
+                    
+                    -- Update the preview image in the cache if this is the first frame/direction
+                    if frame == 0 and dir == 0 then
+                        self.image_cache:set(state.frame_key, cellImage)
+                    end
+                    
+                    index = index + 1
+                    ::continue::
+                end
+            end
+        end
+        
+        -- Mark the DMI as modified
+        self.modified = true
+    end)
+    
+    -- We can't directly set isModified as it's a read-only property
+    -- The spritesheet will be closed anyway when we toggle view modes
+    
+    -- Refresh the display
+    self:repaint_states()
+    
+    app.alert("Changes from spritesheet applied to individual states")
+end
+-- Opens the entire DMI file as a spritesheet for direct editing
 function Editor:edit_spritesheet()
     if not self.dmi then return end
     
@@ -1133,13 +1393,27 @@ function Editor:edit_spritesheet()
         app.command.CloseFile { ui = false }
     end
     
-    -- Open the file directly using the direct Aseprite command
-    app.command.OpenFile { filename = dmiPath }
+    -- Open the file directly using MDFunctions (if available) or the direct command
+    local sprite = nil
+    if MDFunctions and MDFunctions.openAsSpritesheet then
+        sprite = MDFunctions.openAsSpritesheet(nil, dmiPath)
+    end
+    
+    -- If MDFunctions failed, use the direct approach
+    if not sprite then
+        app.command.OpenFile { filename = dmiPath }
+        sprite = app.sprite
+    end
     
     -- Add metadata to the opened sprite
-    if app.sprite then
-        -- Set the data property
-        app.sprite.data = app.sprite.data .. ";dmi_spritesheet=true;dmi_source=" .. dmiPath
+    if sprite then
+        -- Set the data property if not already set
+        if not sprite.data:find("dmi_spritesheet=true") then
+            sprite.data = sprite.data .. ";dmi_spritesheet=true;dmi_source=" .. dmiPath
+        end
+        
+        -- Make sure we see the entire spritesheet
+        app.command.FitScreen()
         
         -- Display a helpful message
         app.alert {
@@ -1150,5 +1424,7 @@ function Editor:edit_spritesheet()
                 "to preserve all state metadata."
             }
         }
+    else
+        app.alert("Failed to open the DMI file as a spritesheet")
     end
 end

@@ -41,7 +41,7 @@ function Editor:onpaint(ctx)
         self:repaint_states()
         return
     end
-
+    
     -- Check if we're in spritesheet mode and render accordingly
     if self.spritesheet_mode and self.spritesheet_sprite then
         self:render_spritesheet(ctx)
@@ -200,6 +200,120 @@ function Editor:onpaint(ctx)
 		ctx:drawThemeRect("sunken_normal", Rectangle(x, self.mouse.position.y - size.height, size.width, size.height))
 		ctx:fillText(text, x + BOX_PADDING, self.mouse.position.y - (text_size.height + size.height) / 2)
 	end
+end
+
+function Editor:render_spritesheet(ctx)
+    if not self.spritesheet_sprite then return end
+    
+    -- Draw a preview of the spritesheet and a message with instructions
+    ctx.color = app.theme.color.text
+    
+    -- Draw title
+    local title = "Spritesheet View"
+    local title_size = ctx:measureText(title)
+    ctx:fillText(title, (ctx.width - title_size.width) / 2, 10)
+    
+    -- Draw instructions
+    local instructions = "Click 'Edit Spritesheet' to open for editing"
+    local instr_size = ctx:measureText(instructions)
+    ctx:fillText(instructions, (ctx.width - instr_size.width) / 2, 30)
+    
+    -- Add an edit button
+    local edit_button_width = 120
+    local edit_button_height = 30
+    local edit_button_x = (ctx.width - edit_button_width) / 2
+    local edit_button_y = 50
+    
+    local edit_button_bounds = Rectangle(edit_button_x, edit_button_y, edit_button_width, edit_button_height)
+    
+    -- Create a button widget if it doesn't exist
+    local found = false
+    for _, widget in ipairs(self.widgets) do
+        if widget.type == "ThemeWidget" and widget.partId == "button_normal" then
+            found = true
+            break
+        end
+    end
+    
+    if not found then
+        table.insert(self.widgets, ThemeWidget.new(
+            self,
+            edit_button_bounds,
+            "button_normal",
+            function() self:edit_spritesheet() end
+        ))
+        
+        table.insert(self.widgets, TextWidget.new(
+            self,
+            Rectangle(edit_button_x, edit_button_y + 5, edit_button_width, 20),
+            "Edit Spritesheet",
+            nil,
+            nil,
+            function() self:edit_spritesheet() end
+        ))
+    end
+    
+    -- Calculate the number of cells in the spritesheet
+    local total_frames = 0
+    for _, state in ipairs(self.dmi.states) do
+        total_frames = total_frames + (state.frame_count * state.dirs)
+    end
+    
+    -- Calculate grid dimensions
+    local grid_size = math.ceil(math.sqrt(total_frames))
+    local actual_width = grid_size * self.dmi.width
+    local actual_height = math.ceil(total_frames / grid_size) * self.dmi.height
+    
+    -- Draw a thumbnail of the spritesheet
+    local max_thumbnail_width = math.min(ctx.width - 20, 300)
+    local max_thumbnail_height = ctx.height - 120
+    
+    -- Calculate scale to fit the thumbnail within the available space
+    local scale_width = max_thumbnail_width / actual_width
+    local scale_height = max_thumbnail_height / actual_height
+    local scale = math.min(scale_width, scale_height)
+    
+    -- Calculate thumbnail dimensions with the appropriate scale
+    local thumbnail_width = actual_width * scale
+    local thumbnail_height = actual_height * scale
+    
+    local thumbnail_x = (ctx.width - thumbnail_width) / 2
+    local thumbnail_y = 90
+    
+    -- Draw a border for the thumbnail
+    ctx.color = app.theme.color.button_normal_text
+    ctx:strokeRect(Rectangle(thumbnail_x - 2, thumbnail_y - 2, thumbnail_width + 4, thumbnail_height + 4))
+    
+    -- Draw a grid to represent the spritesheet
+    local cellWidth = self.dmi.width * scale
+    local cellHeight = self.dmi.height * scale
+    
+    ctx.color = app.theme.color.grid
+    
+    -- Draw horizontal grid lines
+    for y = 0, math.ceil(thumbnail_height / cellHeight) do
+        local y_pos = thumbnail_y + y * cellHeight
+        if y_pos < thumbnail_y + thumbnail_height then
+            ctx:strokeRect(Rectangle(thumbnail_x, y_pos, thumbnail_width, 1))
+        end
+    end
+    
+    -- Draw vertical grid lines
+    for x = 0, math.ceil(thumbnail_width / cellWidth) do
+        local x_pos = thumbnail_x + x * cellWidth
+        if x_pos < thumbnail_x + thumbnail_width then
+            ctx:strokeRect(Rectangle(x_pos, thumbnail_y, 1, thumbnail_height))
+        end
+    end
+    
+    -- Draw metadata info
+    local info_y = thumbnail_y + thumbnail_height + 10
+    
+    ctx.color = app.theme.color.text
+    ctx:fillText("States: " .. #self.dmi.states, thumbnail_x, info_y)
+    ctx:fillText("Total frames: " .. total_frames, thumbnail_x, info_y + 20)
+    ctx:fillText("Size: " .. self.dmi.width .. "x" .. self.dmi.height .. " px", thumbnail_x, info_y + 40)
+    ctx:fillText("Spritesheet dimensions: " .. actual_width .. "x" .. actual_height .. " px", thumbnail_x, info_y + 60)
 end
 
 --- Repaints the states in the editor.
