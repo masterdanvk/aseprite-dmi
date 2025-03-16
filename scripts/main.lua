@@ -140,7 +140,7 @@ end)
 	plugin:newMenuSeparator {
 		group = "dmi_editor",
 	}
-
+	
 	plugin:newCommand {
 		id = "dmi_expand",
 		title = "Expand",
@@ -256,7 +256,50 @@ end)
 			return app.sprite ~= nil
 		end,
 	}
+	
+plugin:newCommand {
+    id = "dmi_tracking_points",
+    title = "Manage Tracking Points",
+    group = "dmi_editor",
+    onclick = function()
+        if app.sprite then
+            loadlib(plugin.path)
+            MDFunctions.showTrackingPointsDialog(app.sprite)
+        else
+            app.alert("No sprite is currently open")
+        end
+    end,
+    onenabled = function()
+        return app.sprite ~= nil
+    end,
+}
 
+plugin:newCommand {
+    id = "dmi_apply_overlay",
+    title = "Apply Overlay with Tracking",
+    group = "dmi_editor",
+    onclick = function()
+        if app.sprite then
+            loadlib(plugin.path)
+            MDFunctions.showApplyOverlayDialog(app.sprite)
+        else
+            app.alert("No sprite is currently open")
+        end
+    end,
+    onenabled = function()
+        return app.sprite ~= nil
+    end,
+}
+
+plugin:newCommand {
+    id = "dmi_create_overlay_template",
+    title = "Create Overlay Template",
+    group = "dmi_editor",
+    onclick = function()
+        loadlib(plugin.path)
+        MDFunctions.createOverlayTemplate()
+    end
+}
 	plugin:newMenuSeparator {
 		group = "dmi_editor",
 	}

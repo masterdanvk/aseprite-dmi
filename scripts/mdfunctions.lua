@@ -58,6 +58,642 @@ function MDFunctions.safeCleanupFile(filepath)
         end
     end
 end
+--- Tracking point system for DMI editor
+-- This allows overlays to track specific points on sprites across frames and states
+
+-- Tracking point color range (magenta-ish colors)
+local TRACKING_COLOR_MIN_RED = 200
+local TRACKING_COLOR_MAX_GREEN = 50
+local TRACKING_COLOR_MIN_BLUE = 200
+
+-- Store tracking points with their associations
+MDFunctions.trackingPoints = {}
+
+-- Define a set of predefined tracking colors
+MDFunctions.trackingColors = {
+    HEAD = Color{red=255, green=0, blue=255, alpha=255}, -- Magenta
+    TORSO = Color{red=255, green=0, blue=200, alpha=255},
+    RIGHT_ARM = Color{red=240, green=0, blue=255, alpha=255},
+    LEFT_ARM = Color{red=225, green=0, blue=255, alpha=255},
+    RIGHT_LEG = Color{red=255, green=0, blue=240, alpha=255},
+    LEFT_LEG = Color{red=255, green=0, blue=225, alpha=255},
+    ACCESSORY = Color{red=225, green=0, blue=225, alpha=255},
+    CUSTOM1 = Color{red=200, green=0, blue=255, alpha=255},
+    CUSTOM2 = Color{red=255, green=0, blue=175, alpha=255}
+}
+
+-- Get user-friendly name for predefined tracking points
+MDFunctions.trackingPointNames = {
+    HEAD = "Head",
+    TORSO = "Torso",
+    RIGHT_ARM = "Right Arm",
+    LEFT_ARM = "Left Arm",
+    RIGHT_LEG = "Right Leg",
+    LEFT_LEG = "Left Leg",
+    ACCESSORY = "Accessory",
+    CUSTOM1 = "Custom 1",
+    CUSTOM2 = "Custom 2"
+}
+
+-- Function to find tracking pixels in an image
+-- Returns a table of tracking points with their positions
+function MDFunctions.findTrackingPoints(image)
+    local points = {}
+    
+    -- Scan every pixel in the image
+    for it in image:pixels() do
+        local x, y = it.x, it.y
+        local color = Color(it())
+        
+        -- Check if this is a tracking color (in the magenta range)
+        if color.red > TRACKING_COLOR_MIN_RED and 
+           color.green < TRACKING_COLOR_MAX_GREEN and 
+           color.blue > TRACKING_COLOR_MIN_BLUE then
+            
+            -- Generate a string ID from the color components
+            local colorID = string.format("R%dG%dB%d", color.red, color.green, color.blue)
+            
+            -- Find name for this color if it's one of our predefined colors
+            local pointName = "Unknown Point"
+            for pointKey, pointColor in pairs(MDFunctions.trackingColors) do
+                if math.abs(color.red - pointColor.red) < 5 and
+                   math.abs(color.green - pointColor.green) < 5 and
+                   math.abs(color.blue - pointColor.blue) < 5 then
+                    pointName = MDFunctions.trackingPointNames[pointKey]
+                    break
+                end
+            end
+            
+            table.insert(points, {
+                id = colorID,
+                x = x,
+                y = y,
+                color = color,
+                name = pointName
+            })
+        end
+    end
+    
+    return points
+end
+
+-- Calculate offsets between reference points and current points
+function MDFunctions.calculateOffsets(referencePoints, currentPoints)
+    local offsets = {}
+    
+    -- For each reference point, find the matching current point
+    for _, refPoint in ipairs(referencePoints) do
+        for _, curPoint in ipairs(currentPoints) do
+            if refPoint.id == curPoint.id then
+                -- Calculate offset
+                offsets[refPoint.id] = {
+                    x = curPoint.x - refPoint.x,
+                    y = curPoint.y - refPoint.y
+                }
+                break
+            end
+        end
+    end
+    
+    return offsets
+end
+
+-- Apply an overlay to a specific frame based on tracking points
+function MDFunctions.applyOverlay(targetSprite, overlaySprite, targetFrameNumber, targetLayerName, trackingPointId)
+    -- Validate inputs
+    if not targetSprite or not overlaySprite then
+        print("Missing sprites in applyOverlay")
+        return false
+    end
+    
+    -- Find tracking points in the overlay sprite
+    local overlayPoints = {}
+    for _, layer in ipairs(overlaySprite.layers) do
+        if layer.isVisible and layer:cel(1) then
+            local cel = layer:cel(1)
+            local points = MDFunctions.findTrackingPoints(cel.image)
+            for _, point in ipairs(points) do
+                overlayPoints[point.id] = {
+                    point = point,
+                    cel = cel
+                }
+            end
+        end
+    end
+    
+    -- If no tracking points found, exit
+    if #table.keys_len(overlayPoints) == 0 then
+        print("No tracking points found in overlay")
+        return false
+    end
+    
+    -- Find the target layer
+    local targetLayer = nil
+    for _, layer in ipairs(targetSprite.layers) do
+        if layer.name == targetLayerName then
+            targetLayer = layer
+            break
+        end
+    end
+    
+    if not targetLayer then
+        print("Target layer not found: " .. targetLayerName)
+        return false
+    end
+    
+    -- Get the target cel
+    local targetCel = targetLayer:cel(targetFrameNumber)
+    if not targetCel then
+        print("Target cel not found for frame " .. targetFrameNumber)
+        return false
+    end
+    
+    -- Find tracking points in the target sprite
+    local targetPoints = MDFunctions.findTrackingPoints(targetCel.image)
+    
+    -- If specific tracking point requested, filter for that
+    if trackingPointId and trackingPointId ~= "" then
+        local filteredPoints = {}
+        for _, point in ipairs(targetPoints) do
+            if point.id == trackingPointId then
+                table.insert(filteredPoints, point)
+            end
+        end
+        targetPoints = filteredPoints
+    end
+    
+    if #targetPoints == 0 then
+        print("No matching tracking points found in target sprite")
+        return false
+    end
+    
+    -- For each tracking point in target, apply the overlay if we have matching point
+    app.transaction("Apply Overlay", function()
+        for _, targetPoint in ipairs(targetPoints) do
+            if overlayPoints[targetPoint.id] then
+                local overlayInfo = overlayPoints[targetPoint.id]
+                local offX = targetPoint.x - overlayInfo.point.x
+                local offY = targetPoint.y - overlayInfo.point.y
+                
+                -- Create or find overlay layer
+                local overlayLayer = nil
+                local layerName = "Overlay_" .. targetPoint.name
+                
+                for _, layer in ipairs(targetSprite.layers) do
+                    if layer.name == layerName then
+                        overlayLayer = layer
+                        break
+                    end
+                end
+                
+                if not overlayLayer then
+                    overlayLayer = targetSprite:newLayer()
+                    overlayLayer.name = layerName
+                    overlayLayer.opacity = 255
+                end
+                
+                -- Apply the overlay
+                local overlayImage = overlayInfo.cel.image:clone()
+                
+                -- Remove the tracking pixel from the overlay
+                for y = 0, overlayImage.height - 1 do
+                    for x = 0, overlayImage.width - 1 do
+                        local color = overlayImage:getPixel(x, y)
+                        local c = Color(color)
+                        if c.red > TRACKING_COLOR_MIN_RED and 
+                           c.green < TRACKING_COLOR_MAX_GREEN and 
+                           c.blue > TRACKING_COLOR_MIN_BLUE then
+                            overlayImage:putPixel(x, y, app.pixelColor.rgba(0, 0, 0, 0))
+                        end
+                    end
+                end
+                
+                -- Create a new cel with the overlay
+                targetSprite:newCel(overlayLayer, targetFrameNumber, overlayImage, Point(offX, offY))
+            end
+        end
+    end)
+    
+    return true
+end
+
+-- Apply overlays to all frames of a sprite
+function MDFunctions.applyOverlaysToAllFrames(targetSprite, overlaySprite, targetLayerName, trackingPointId)
+    local success = false
+    
+    for _, frame in ipairs(targetSprite.frames) do
+        local frameSuccess = MDFunctions.applyOverlay(
+            targetSprite, 
+            overlaySprite, 
+            frame.frameNumber,
+            targetLayerName,
+            trackingPointId
+        )
+        
+        success = success or frameSuccess
+    end
+    
+    return success
+end
+
+-- Dialog to manage tracking points
+function MDFunctions.showTrackingPointsDialog(sprite)
+    local dlg = Dialog("Tracking Points Manager")
+    
+    -- Find all current tracking points in the sprite
+    local allPoints = {}
+    for _, layer in ipairs(sprite.layers) do
+        if layer.isVisible then
+            for _, frame in ipairs(sprite.frames) do
+                local cel = layer:cel(frame.frameNumber)
+                if cel then
+                    local points = MDFunctions.findTrackingPoints(cel.image)
+                    for _, point in ipairs(points) do
+                        -- Use ID as key to avoid duplicates
+                        allPoints[point.id] = point
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Convert to array for display
+    local pointsArray = {}
+    for _, point in pairs(allPoints) do
+        table.insert(pointsArray, point)
+    end
+    
+    -- Display tracking points legend
+    dlg:label { text = "Tracking Points: " .. #pointsArray .. " found" }
+    dlg:separator()
+    
+    for i, point in ipairs(pointsArray) do
+        dlg:label { text = point.name .. " (" .. point.id .. ")" }
+        local colorLabel = string.format("R: %d, G: %d, B: %d", 
+            point.color.red, point.color.green, point.color.blue)
+        dlg:color { id = "color_" .. i, color = point.color }
+        dlg:label { text = colorLabel }
+        dlg:separator()
+    end
+    
+    -- Add tracking point tools
+    dlg:button { 
+        text = "Add Tracking Point Tool", 
+        onclick = function() 
+            dlg:close()
+            MDFunctions.showAddTrackingPointDialog(sprite)
+        end
+    }
+    
+    -- Apply overlay options
+    dlg:separator { text = "Apply Overlays" }
+    dlg:button {
+        text = "Apply Overlay from File",
+        onclick = function()
+            dlg:close()
+            MDFunctions.showApplyOverlayDialog(sprite)
+        end
+    }
+    
+    dlg:button { id = "close", text = "Close" }
+    dlg:show()
+end
+
+-- Dialog to add a new tracking point
+function MDFunctions.showAddTrackingPointDialog(sprite)
+    local dlg = Dialog("Add Tracking Point")
+    
+    dlg:label { text = "Select a tracking point to add:" }
+    
+    -- Create dropdown of available tracking points
+    local options = {}
+    for pointKey, pointName in pairs(MDFunctions.trackingPointNames) do
+        table.insert(options, pointName)
+    end
+    
+    dlg:combobox {
+        id = "pointType",
+        options = options,
+        option = options[1]
+    }
+    
+    dlg:label { text = "Click OK then place the tracking point in your sprite." }
+    dlg:label { text = "The tracking point will be a single pixel in the selected color." }
+    
+    dlg:button {
+        id = "ok",
+        text = "OK",
+        onclick = function()
+            -- Find the selected color
+            local selectedName = dlg.data.pointType
+            local selectedKey = nil
+            
+            for key, name in pairs(MDFunctions.trackingPointNames) do
+                if name == selectedName then
+                    selectedKey = key
+                    break
+                end
+            end
+            
+            if selectedKey then
+                local selectedColor = MDFunctions.trackingColors[selectedKey]
+                
+                -- Start pixel placing tool
+                dlg:close()
+                
+                -- Store the tracking color in global settings so the tool can use it
+                app.preferences.tool.fg = selectedColor
+                -- Switch to pencil tool
+                app.command.SwitchTool { tool="pencil" }
+                
+                app.alert {
+                    title = "Add Tracking Point",
+                    text = {
+                        "Click to place the " .. selectedName .. " tracking point.",
+                        "It will appear as a single magenta pixel.",
+                        "Add it to a visible but separate layer."
+                    }
+                }
+            end
+        end
+    }
+    
+    dlg:button { id = "cancel", text = "Cancel" }
+    dlg:show()
+end
+
+-- Dialog to apply an overlay from a file
+function MDFunctions.showApplyOverlayDialog(targetSprite)
+    local dlg = Dialog("Apply Overlay")
+    
+    dlg:file {
+        id = "overlayFile",
+        label = "Overlay Sprite:",
+        filetypes = { "aseprite", "ase", "dmi" },
+        open = true
+    }
+    
+    -- Target layer selection
+    local layerOptions = {}
+    for _, layer in ipairs(targetSprite.layers) do
+        table.insert(layerOptions, layer.name)
+    end
+    
+    dlg:combobox {
+        id = "targetLayer",
+        label = "Target Layer:",
+        options = layerOptions,
+        option = layerOptions[1]
+    }
+    
+    -- Tracking point selection
+    dlg:check {
+        id = "allPoints",
+        label = "All Tracking Points",
+        selected = true
+    }
+    
+    dlg:button {
+        id = "ok",
+        text = "Apply",
+        onclick = function()
+            local overlayPath = dlg.data.overlayFile
+            
+            if overlayPath and overlayPath ~= "" then
+                -- Load the overlay sprite
+                local overlaySprite = nil
+                
+                app.transaction(function()
+                    -- Temporarily load the overlay sprite
+                    overlaySprite = Sprite{ fromFile = overlayPath }
+                end)
+                
+                if overlaySprite then
+                    -- Apply the overlay
+                    local success = MDFunctions.applyOverlaysToAllFrames(
+                        targetSprite,
+                        overlaySprite,
+                        dlg.data.targetLayer,
+                        dlg.data.allPoints and "" or nil  -- If allPoints is checked, don't filter
+                    )
+                    
+                    -- Clean up
+                    overlaySprite:close()
+                    
+                    if success then
+                        app.alert("Overlay applied successfully!")
+                    else
+                        app.alert("Failed to apply overlay. Make sure tracking points match.")
+                    end
+                else
+                    app.alert("Failed to open overlay file.")
+                end
+            else
+                app.alert("Please select an overlay file.")
+            end
+            
+            dlg:close()
+        end
+    }
+    
+    dlg:button { id = "cancel", text = "Cancel" }
+    dlg:show()
+end
+-- Add this function to MDFunctions module
+
+-- Add this function to MDFunctions module
+
+-- Create a new overlay template sprite with tracking points
+function MDFunctions.createOverlayTemplate()
+    local dlg = Dialog("Create Overlay Template")
+    
+    dlg:number {
+        id = "width",
+        label = "Width:",
+        text = "32",
+        decimals = 0
+    }
+    
+    dlg:number {
+        id = "height",
+        label = "Height:",
+        text = "32",
+        decimals = 0
+    }
+    
+    dlg:separator { text = "Tracking Points" }
+    
+    -- Add checkboxes for common tracking points
+    dlg:check {
+        id = "head",
+        label = "Include Head Tracking Point",
+        selected = true
+    }
+    
+    dlg:check {
+        id = "torso",
+        label = "Include Torso Tracking Point",
+        selected = true
+    }
+    
+    dlg:check {
+        id = "arms",
+        label = "Include Arm Tracking Points",
+        selected = false
+    }
+    
+    dlg:check {
+        id = "legs",
+        label = "Include Leg Tracking Points",
+        selected = false
+    }
+    
+    dlg:check {
+        id = "accessory",
+        label = "Include Accessory Tracking Point",
+        selected = false
+    }
+    
+    dlg:button {
+        id = "ok",
+        text = "Create",
+        onclick = function()
+            -- Create the new sprite
+            local width = dlg.data.width
+            local height = dlg.data.height
+            
+            if width < 1 or height < 1 then
+                app.alert("Invalid dimensions")
+                return
+            end
+            
+            app.transaction("Create Overlay Template", function()
+                local sprite = Sprite(width, height)
+                
+                -- Create base layer
+                local baseLayer = sprite.layers[1]
+                baseLayer.name = "Base"
+                
+                -- Create tracking points layer
+                local trackingLayer = sprite:newLayer()
+                trackingLayer.name = "Tracking Points"
+                
+                -- Create overlay layer
+                local overlayLayer = sprite:newLayer()
+                overlayLayer.name = "Overlay"
+                
+                -- Add tracking points
+                local image = Image(width, height, ColorMode.RGB)
+                image:clear()
+                
+                -- Position points at reasonable locations based on typical sprite anatomy
+                local centerX = math.floor(width / 2)
+                
+                if dlg.data.head then
+                    -- Head at top center
+                    local headY = math.floor(height * 0.25)
+                    image:putPixel(centerX, headY, MDFunctions.trackingColors.HEAD.rgbaPixel)
+                end
+                
+                if dlg.data.torso then
+                    -- Torso at middle center
+                    local torsoY = math.floor(height * 0.5)
+                    image:putPixel(centerX, torsoY, MDFunctions.trackingColors.TORSO.rgbaPixel)
+                end
+                
+                if dlg.data.arms then
+                    -- Arms at middle sides
+                    local armsY = math.floor(height * 0.4)
+                    local leftX = math.floor(width * 0.25)
+                    local rightX = math.floor(width * 0.75)
+                    
+                    image:putPixel(leftX, armsY, MDFunctions.trackingColors.LEFT_ARM.rgbaPixel)
+                    image:putPixel(rightX, armsY, MDFunctions.trackingColors.RIGHT_ARM.rgbaPixel)
+                end
+                
+                if dlg.data.legs then
+                    -- Legs at bottom sides
+                    local legsY = math.floor(height * 0.8)
+                    local leftX = math.floor(width * 0.35)
+                    local rightX = math.floor(width * 0.65)
+                    
+                    image:putPixel(leftX, legsY, MDFunctions.trackingColors.LEFT_LEG.rgbaPixel)
+                    image:putPixel(rightX, legsY, MDFunctions.trackingColors.RIGHT_LEG.rgbaPixel)
+                end
+                
+                if dlg.data.accessory then
+                    -- Accessory near top
+                    local accY = math.floor(height * 0.15)
+                    local accX = math.floor(width * 0.65)
+                    
+                    image:putPixel(accX, accY, MDFunctions.trackingColors.ACCESSORY.rgbaPixel)
+                end
+                
+                -- Add the tracking points to the tracking layer
+                sprite:newCel(trackingLayer, 1, image, Point(0, 0))
+                
+                -- Create a simple visual reference on the base layer
+                local baseImage = Image(width, height, ColorMode.RGB)
+                baseImage:clear()
+                
+                -- Draw a simple stick figure outline
+                for x = centerX-4, centerX+4 do
+                    for y = height*0.2, height*0.3 do
+                        if math.abs(x - centerX)^2 + math.abs(y - height*0.25)^2 < 16 then
+                            baseImage:putPixel(x, y, app.pixelColor.rgba(200, 200, 200, 128))
+                        end
+                    end
+                end
+                
+                -- Draw body
+                for y = height*0.3, height*0.6 do
+                    baseImage:putPixel(centerX, y, app.pixelColor.rgba(200, 200, 200, 128))
+                end
+                
+                -- Draw arms and legs (simple lines)
+                if dlg.data.arms then
+                    local armsY = math.floor(height * 0.4)
+                    for x = width*0.3, width*0.7 do
+                        baseImage:putPixel(x, armsY, app.pixelColor.rgba(200, 200, 200, 128))
+                    end
+                end
+                
+                if dlg.data.legs then
+                    local legsTopY = math.floor(height * 0.6)
+                    local legsBottomY = math.floor(height * 0.9)
+                    
+                    for y = legsTopY, legsBottomY do
+                        local leftX = centerX - (y - legsTopY) * 0.3
+                        local rightX = centerX + (y - legsTopY) * 0.3
+                        
+                        baseImage:putPixel(leftX, y, app.pixelColor.rgba(200, 200, 200, 128))
+                        baseImage:putPixel(rightX, y, app.pixelColor.rgba(200, 200, 200, 128))
+                    end
+                end
+                
+                sprite:newCel(baseLayer, 1, baseImage, Point(0, 0))
+                
+                -- Add instructions
+                app.alert {
+                    title = "Overlay Template Created",
+                    text = {
+                        "Template created with tracking points.",
+                        "1. Draw your overlay on the 'Overlay' layer",
+                        "2. Keep tracking points visible but on a separate layer",
+                        "3. Save the sprite when done"
+                    }
+                }
+            end)
+            
+            dlg:close()
+        end
+    }
+    
+    dlg:button { id = "cancel", text = "Cancel" }
+    dlg:show()
+end
+
+
 --- Opens a DMI file as a spritesheet for direct editing
 --- @param editor Editor The DMI editor instance (optional)
 --- @param dmiPath string The path to the DMI file
