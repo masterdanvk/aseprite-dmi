@@ -203,7 +203,7 @@ function Editor:onpaint(ctx)
 end
 
 function Editor:render_spritesheet(ctx)
-    if not self.spritesheet_sprite then return end
+    if not self.dmi then return end
     
     -- Draw a preview of the spritesheet and a message with instructions
     ctx.color = app.theme.color.text
@@ -226,16 +226,17 @@ function Editor:render_spritesheet(ctx)
     
     local edit_button_bounds = Rectangle(edit_button_x, edit_button_y, edit_button_width, edit_button_height)
     
-    -- Create a button widget if it doesn't exist
+    -- Create button widgets if they don't exist
     local found = false
     for _, widget in ipairs(self.widgets) do
-        if widget.type == "ThemeWidget" and widget.partId == "button_normal" then
+        if widget.type == "ThemeWidget" and widget.bounds and widget.bounds.x == edit_button_x then
             found = true
             break
         end
     end
     
     if not found then
+        -- Add button background
         table.insert(self.widgets, ThemeWidget.new(
             self,
             edit_button_bounds,
@@ -243,6 +244,7 @@ function Editor:render_spritesheet(ctx)
             function() self:edit_spritesheet() end
         ))
         
+        -- Add button text
         table.insert(self.widgets, TextWidget.new(
             self,
             Rectangle(edit_button_x, edit_button_y + 5, edit_button_width, 20),
@@ -284,10 +286,11 @@ function Editor:render_spritesheet(ctx)
     ctx.color = app.theme.color.button_normal_text
     ctx:strokeRect(Rectangle(thumbnail_x - 2, thumbnail_y - 2, thumbnail_width + 4, thumbnail_height + 4))
     
-    -- Draw a grid to represent the spritesheet
+    -- Draw a simple grid to represent the spritesheet
     local cellWidth = self.dmi.width * scale
     local cellHeight = self.dmi.height * scale
     
+    -- Draw a checkerboard pattern for the thumbnail background
     ctx.color = app.theme.color.grid
     
     -- Draw horizontal grid lines
@@ -306,6 +309,35 @@ function Editor:render_spritesheet(ctx)
         end
     end
     
+    -- Draw some sample cells to indicate content
+    -- (this provides a visual even if we can't load the actual content)
+    ctx.color = app.theme.color.button_normal_text
+    local sampleCount = math.min(10, total_frames)
+    for i = 1, sampleCount do
+        -- Calculate position
+        local col = (i-1) % grid_size
+        local row = math.floor((i-1) / grid_size)
+        local x = thumbnail_x + col * cellWidth
+        local y = thumbnail_y + row * cellHeight
+        
+        -- Draw a simple icon representation (a face)
+        local centerX = x + cellWidth/2
+        local centerY = y + cellHeight/2
+        local radius = math.min(cellWidth, cellHeight) * 0.3
+        
+        -- Draw circle for head
+        ctx:strokeRect(Rectangle(centerX - radius, centerY - radius, radius*2, radius*2))
+        
+        -- Draw eyes
+        local eyeRadius = radius * 0.2
+        ctx:strokeRect(Rectangle(centerX - radius*0.5 - eyeRadius, centerY - radius*0.3 - eyeRadius, eyeRadius*2, eyeRadius*2))
+        ctx:strokeRect(Rectangle(centerX + radius*0.5 - eyeRadius, centerY - radius*0.3 - eyeRadius, eyeRadius*2, eyeRadius*2))
+        
+        -- Draw smile
+        local smileWidth = radius * 1.2
+        ctx:strokeRect(Rectangle(centerX - smileWidth/2, centerY + radius*0.3, smileWidth, 1))
+    end
+    
     -- Draw metadata info
     local info_y = thumbnail_y + thumbnail_height + 10
     
@@ -321,88 +353,122 @@ end
 --- Only creates state widgets for states that are currently visible based on the scroll position.
 --- Calls the repaint function to update the editor display.
 function Editor:repaint_states()
-	self.widgets = {}
-	local duplicates = {}
-	local min_index = (self.max_in_a_row * self.scroll)
-	local max_index = min_index + self.max_in_a_row * (self.max_in_a_column + 1)
-	for index, state in ipairs(self.dmi.states) do
-		if index > min_index and index <= max_index then
-			local bounds = self:box_bounds(index)
-			local text_color = nil
+    self.widgets = {}
+    local duplicates = {}
+    local min_index = (self.max_in_a_row * self.scroll)
+    local max_index = min_index + self.max_in_a_row * (self.max_in_a_column + 1)
+    
+    for index, state in ipairs(self.dmi.states) do
+        if index > min_index and index <= max_index then
+            local bounds = self:box_bounds(index)
+            local text_color = nil
 
-			if not (#state.name > 0) then
-				text_color = Color { red = 230, green = 223, blue = 69, alpha = 255 }
-			end
+            if not (#state.name > 0) then
+                text_color = Color { red = 230, green = 223, blue = 69, alpha = 255 }
+            end
 
-			if duplicates[state.name] then
-				text_color = Color { red = 230, green = 69, blue = 69, alpha = 255 }
-			else
-				for _, state_ in ipairs(self.dmi.states) do
-					if state.name == state_.name then
-						duplicates[state.name] = true
-						break
-					end
-				end
-			end
+            if duplicates[state.name] then
+                text_color = Color { red = 230, green = 69, blue = 69, alpha = 255 }
+            else
+                for _, state_ in ipairs(self.dmi.states) do
+                    if state.name == state_.name then
+                        duplicates[state.name] = true
+                        break
+                    end
+                end
+            end
 
-			local name = #state.name > 0 and state.name or "no name"
+            local name = #state.name > 0 and state.name or "no name"
 
-			local icon = self.image_cache:get(state.frame_key)
-			local bytes = string.char(libdmi.overlay_color(app.theme.color.face.red, app.theme.color.face.green,
-				app.theme.color.face.blue, icon.width, icon.height, string.byte(icon.bytes, 1, #icon.bytes)) --[[@as number]])
+            -- Create a fallback icon in case image loading fails
+            local fallback_icon = Image(self.dmi.width, self.dmi.height)
+            fallback_icon:clear()
+            
+            -- Draw a border on the fallback icon
+            for x = 0, self.dmi.width-1 do
+                for y = 0, self.dmi.height-1 do
+                    if (x == 0 or x == self.dmi.width-1 or y == 0 or y == self.dmi.height-1) then
+                        fallback_icon:putPixel(x, y, app.pixelColor.rgba(128, 128, 128, 255))
+                    end
+                end
+            end
+            
+            -- Try to load the actual icon
+            local icon = fallback_icon
+            
+            if self.image_cache then
+                local cached_image = self.image_cache:get(state.frame_key)
+                if cached_image and cached_image.width > 0 and cached_image.height > 0 then
+                    -- Try to create the actual icon, with error handling
+                    local success, result = pcall(function()
+                        local bytes = string.char(libdmi.overlay_color(
+                            app.theme.color.face.red, 
+                            app.theme.color.face.green,
+                            app.theme.color.face.blue, 
+                            cached_image.width, 
+                            cached_image.height, 
+                            string.byte(cached_image.bytes, 1, #cached_image.bytes)
+                        ))
+                        local real_icon = Image(cached_image.width, cached_image.height)
+                        real_icon.bytes = bytes
+                        return real_icon
+                    end)
+                    
+                    if success then
+                        icon = result
+                    end
+                end
+            end
 
-			local icon = Image(icon.width, icon.height)
-			icon.bytes = bytes
+            table.insert(self.widgets, IconWidget.new(
+                self,
+                bounds,
+                icon,
+                function() self:open_state(state) end,
+                function(ev) self:state_context(state, ev) end
+            ))
 
-			table.insert(self.widgets, IconWidget.new(
-				self,
-				bounds,
-				icon,
-				function() self:open_state(state) end,
-				function(ev) self:state_context(state, ev) end
-			))
+            table.insert(self.widgets, TextWidget.new(
+                self,
+                Rectangle(
+                    bounds.x,
+                    bounds.y + bounds.height + BOX_PADDING,
+                    bounds.width,
+                    TEXT_HEIGHT
+                ),
+                name,
+                text_color,
+                name,
+                function() self:state_properties(state) end,
+                function(ev) self:state_context(state, ev) end
+            ))
+        end
+    end
 
-			table.insert(self.widgets, TextWidget.new(
-				self,
-				Rectangle(
-					bounds.x,
-					bounds.y + bounds.height + BOX_PADDING,
-					bounds.width,
-					TEXT_HEIGHT
-				),
-				name,
-				text_color,
-				name,
-				function() self:state_properties(state) end,
-				function(ev) self:state_context(state, ev) end
-			))
-		end
-	end
+    if #self.dmi.states < max_index then
+        local index = #self.dmi.states + 1
+        local bounds = self:box_bounds(index)
 
-	if #self.dmi.states < max_index then
-		local index = #self.dmi.states + 1
-		local bounds = self:box_bounds(index)
+        table.insert(self.widgets, ThemeWidget.new(
+            self,
+            bounds,
+            nil,
+            function() self:new_state() end
+        ))
 
-		table.insert(self.widgets, ThemeWidget.new(
-			self,
-			bounds,
-			nil,
-			function() self:new_state() end
-		))
+        table.insert(self.widgets, TextWidget.new(
+            self,
+            Rectangle(
+                bounds.x,
+                bounds.y + bounds.height / 2 - 3,
+                bounds.width,
+                TEXT_HEIGHT
+            ),
+            "+"
+        ))
+    end
 
-		table.insert(self.widgets, TextWidget.new(
-			self,
-			Rectangle(
-				bounds.x,
-				bounds.y + bounds.height / 2 - 3,
-				bounds.width,
-				TEXT_HEIGHT
-			),
-			"+"
-		))
-	end
-
-	self:repaint()
+    self:repaint()
 end
 
 function Editor:box_bounds(index)

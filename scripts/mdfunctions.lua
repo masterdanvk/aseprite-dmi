@@ -13,10 +13,13 @@ local settings = {
     debugMode = false
 }
 
+--- Global debug mode setting - set to false to disable all debug output
+MDFunctions.debugMode = false
+
 --- Debug message function
-local function dbgMsg(msg)
-    if settings.debugMode then
-        app.alert("DEBUG: " .. msg)
+function MDFunctions.dbgMsg(msg)
+    if MDFunctions.debugMode then
+        print("DEBUG: " .. msg)
     end
 end
 
@@ -58,6 +61,7 @@ function MDFunctions.safeCleanupFile(filepath)
         end
     end
 end
+
 --- Tracking point system for DMI editor
 -- This allows overlays to track specific points on sprites across frames and states
 
@@ -95,6 +99,14 @@ MDFunctions.trackingPointNames = {
     CUSTOM2 = "Custom 2"
 }
 
+-- Helper function to safely check if a table has any keys
+function table.keys_len(t)
+    if not t then return 0 end
+    local count = 0
+    for _ in pairs(t) do count = count + 1 end
+    return count
+end
+
 -- Function to find tracking pixels in an image
 -- Returns a table of tracking points with their positions
 function MDFunctions.findTrackingPoints(image)
@@ -115,17 +127,20 @@ function MDFunctions.findTrackingPoints(image)
             
             -- Find name for this color if it's one of our predefined colors
             local pointName = "Unknown Point"
+            local matchedKey = nil
             for pointKey, pointColor in pairs(MDFunctions.trackingColors) do
                 if math.abs(color.red - pointColor.red) < 5 and
                    math.abs(color.green - pointColor.green) < 5 and
                    math.abs(color.blue - pointColor.blue) < 5 then
                     pointName = MDFunctions.trackingPointNames[pointKey]
+                    matchedKey = pointKey
                     break
                 end
             end
             
             table.insert(points, {
                 id = colorID,
+                key = matchedKey,
                 x = x,
                 y = y,
                 color = color,
@@ -162,8 +177,7 @@ end
 function MDFunctions.applyOverlay(targetSprite, overlaySprite, targetFrameNumber, targetLayerName, trackingPointId)
     -- Validate inputs
     if not targetSprite or not overlaySprite then
-        print("Missing sprites in applyOverlay")
-        return false
+        return false  -- Silent fail - no console output
     end
     
     -- Find tracking points in the overlay sprite
@@ -182,9 +196,8 @@ function MDFunctions.applyOverlay(targetSprite, overlaySprite, targetFrameNumber
     end
     
     -- If no tracking points found, exit
-    if #table.keys_len(overlayPoints) == 0 then
-        print("No tracking points found in overlay")
-        return false
+    if table.keys_len(overlayPoints) == 0 then
+        return false  -- Silent fail - no console output
     end
     
     -- Find the target layer
@@ -197,15 +210,13 @@ function MDFunctions.applyOverlay(targetSprite, overlaySprite, targetFrameNumber
     end
     
     if not targetLayer then
-        print("Target layer not found: " .. targetLayerName)
-        return false
+        return false  -- Silent fail - no console output
     end
     
     -- Get the target cel
     local targetCel = targetLayer:cel(targetFrameNumber)
     if not targetCel then
-        print("Target cel not found for frame " .. targetFrameNumber)
-        return false
+        return false  -- Silent fail - no console output
     end
     
     -- Find tracking points in the target sprite
@@ -223,8 +234,7 @@ function MDFunctions.applyOverlay(targetSprite, overlaySprite, targetFrameNumber
     end
     
     if #targetPoints == 0 then
-        print("No matching tracking points found in target sprite")
-        return false
+        return false  -- Silent fail - no console output
     end
     
     -- For each tracking point in target, apply the overlay if we have matching point
@@ -296,6 +306,640 @@ function MDFunctions.applyOverlaysToAllFrames(targetSprite, overlaySprite, targe
     return success
 end
 
+-- Dialog to apply overlays from an existing layer
+function MDFunctions.showLayerOverlayDialog(sprite)
+    if not sprite then
+        app.alert("No sprite is currently open")
+        return
+    end
+    
+    local dlg = Dialog("Apply Layer as Overlay")
+    
+    -- Get list of available layers for source and target
+    local layerOptions = {}
+    for _, layer in ipairs(sprite.layers) do
+        table.insert(layerOptions, layer.name)
+    end
+    
+    dlg:label { text = "This will apply a layer as an overlay to other frames" }
+    dlg:label { text = "using tracking points to position the overlay correctly." }
+    
+    dlg:separator()
+    
+    -- Source layer (overlay content)
+    dlg:combobox {
+        id = "overlayLayer",
+        label = "Overlay Source Layer:",
+        options = layerOptions,
+        option = layerOptions[1]
+    }
+    
+    -- Target layer (where tracking pixels are)
+    dlg:combobox {
+        id = "targetLayer",
+        label = "Target Layer (with tracking points):",
+        options = layerOptions,
+        option = layerOptions[1]
+    }
+    
+    -- Create a dropdown to select which tracking point type to use
+    local trackingPointOptions = {"Any tracking point"}
+    
+    -- Add all predefined tracking point types
+    for pointKey, pointName in pairs(MDFunctions.trackingPointNames) do
+        table.insert(trackingPointOptions, pointName)
+    end
+    
+    dlg:combobox {
+        id = "trackingPointType",
+        label = "Use Tracking Point Type:",
+        options = trackingPointOptions,
+        option = trackingPointOptions[1]
+    }
+    
+    -- Option to create a new layer for overlays or use the source layer
+    dlg:check {
+        id = "createNewLayer",
+        label = "Create new overlay layers",
+        selected = true
+    }
+    
+    -- Choose which frames to use as source
+    dlg:label { text = "Use the first N frames as source:" }
+    
+    dlg:number {
+        id = "sourceFrames",
+        label = "Source Frames:",
+        text = "4",
+        decimals = 0,
+        min = 1,
+        max = #sprite.frames
+    }
+    
+    -- Apply options
+    dlg:separator { text = "Apply To" }
+    
+    dlg:check {
+        id = "applyToAll",
+        label = "Apply to all frames",
+        selected = true
+    }
+    
+    dlg:check {
+        id = "respectDirections",
+        label = "Respect SNEW directions (match same directions)",
+        selected = true
+    }
+    
+    dlg:button {
+        id = "ok",
+        text = "Apply",
+        onclick = function()
+            local overlayLayerName = dlg.data.overlayLayer
+            local targetLayerName = dlg.data.targetLayer
+            local createNewLayer = dlg.data.createNewLayer
+            local sourceFrames = dlg.data.sourceFrames
+            local applyToAll = dlg.data.applyToAll
+            local respectDirections = dlg.data.respectDirections
+            
+            -- Get the selected tracking point type
+            local selectedTrackingPointType = dlg.data.trackingPointType
+            local selectedTrackingColor = nil
+            
+            if selectedTrackingPointType ~= "Any tracking point" then
+                -- Find the key for the selected tracking point type
+                local selectedKey = nil
+                for key, name in pairs(MDFunctions.trackingPointNames) do
+                    if name == selectedTrackingPointType then
+                        selectedKey = key
+                        break
+                    end
+                end
+                
+                -- Get the color for the selected tracking point type
+                if selectedKey and MDFunctions.trackingColors[selectedKey] then
+                    selectedTrackingColor = MDFunctions.trackingColors[selectedKey]
+                end
+            end
+            
+            -- Find the source and target layers
+            local overlayLayer = nil
+            local targetLayer = nil
+            
+            for _, layer in ipairs(sprite.layers) do
+                if layer.name == overlayLayerName then
+                    overlayLayer = layer
+                end
+                if layer.name == targetLayerName then
+                    targetLayer = layer
+                end
+            end
+            
+            if not overlayLayer or not targetLayer then
+                app.alert("Could not find one of the specified layers")
+                return
+            end
+            
+            -- Apply the overlay
+            app.transaction("Apply Layer Overlay", function()
+                local success = MDFunctions.applyLayerAsOverlay(
+                    sprite,
+                    overlayLayer, 
+                    targetLayer,
+                    sourceFrames,
+                    createNewLayer,
+                    applyToAll,
+                    respectDirections,
+                    selectedTrackingColor
+                )
+                
+                if success then
+                    app.alert("Overlay applied successfully!")
+                else
+                    app.alert("Failed to apply overlay. Make sure tracking points exist.")
+                end
+            end)
+            
+            dlg:close()
+        end
+    }
+    
+    dlg:button { id = "cancel", text = "Cancel" }
+    dlg:show()
+end
+
+-- Function to copy overlays from source cells to target cells with proper shifting
+function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sourceFrameCount, createNewLayers, applyToAll, respectDirections, specificTrackingColor)
+    if not sprite or not overlayLayer or not targetLayer then
+        app.alert("Required layers not found")
+        return false
+    end
+    
+    print("===== STARTING OVERLAY COPY+SHIFT =====")
+    print("Sprite: " .. sprite.width .. "x" .. sprite.height .. " pixels")
+    
+    -- Determine grid cell size
+    local gridSize = 32  -- Default for most DMI files
+    local detectedSize = MDFunctions.detectIconSize(sprite)
+    if detectedSize then
+        gridSize = detectedSize
+    end
+    print("Using grid size: " .. gridSize .. "x" .. gridSize)
+    
+    -- Calculate grid dimensions
+    local gridCols = sprite.width / gridSize
+    local gridRows = sprite.height / gridSize
+    print("Grid dimensions: " .. gridCols .. "x" .. gridRows .. " cells")
+    
+    -- Get cels for both layers
+    local targetCel = targetLayer:cel(1)
+    local overlayCel = overlayLayer:cel(1)
+    
+    if not targetCel or not overlayCel then
+        app.alert("Missing required cels")
+        return false
+    end
+    
+    -- STEP 1: Get direction information
+    local directionInfo = {}
+    
+    -- Try to get metadata from the sprite
+    local dmiMetadata = nil
+    if sprite.data and sprite.data:find("dmi_source=") then
+        local start = sprite.data:find("dmi_source=") + 11
+        local endPos = sprite.data:find(";", start) or sprite.data:len() + 1
+        local dmiPath = sprite.data:sub(start, endPos - 1)
+        
+        print("Found DMI path: " .. dmiPath)
+        dmiMetadata = MDFunctions.getDmiMetadata(sprite)
+    end
+    
+    if dmiMetadata and dmiMetadata.states and #dmiMetadata.states > 0 then
+        print("Successfully retrieved DMI metadata with " .. #dmiMetadata.states .. " states")
+        
+        -- Create a mapping of cell indices to directions
+        local cellIndex = 0
+        for stateIdx, state in ipairs(dmiMetadata.states) do
+            for frame = 0, state.frame_count - 1 do
+                for dir = 0, state.dirs - 1 do
+                    directionInfo[cellIndex] = {
+                        direction = dir,
+                        directionName = dir < #DIRECTION_NAMES and DIRECTION_NAMES[dir + 1] or "Unknown",
+                        stateIndex = stateIdx
+                    }
+                    cellIndex = cellIndex + 1
+                end
+            end
+        end
+    else
+        print("No DMI metadata - will use positional assumptions")
+        -- Create basic direction info for first 4 cells
+        for i = 0, 3 do
+            directionInfo[i] = {
+                direction = i,
+                directionName = DIRECTION_NAMES[i + 1] or "Unknown",
+                stateIndex = 1
+            }
+        end
+    end
+    
+    -- STEP 2: Find all tracking points in the sprite
+    print("\n===== SCANNING FOR TRACKING POINTS =====")
+    
+    local cellTrackingPoints = {}  -- Indexed by cell index
+    local targetImage = targetCel.image
+    
+    -- Scan every pixel for tracking points
+    for y = 0, targetImage.height - 1 do
+        for x = 0, targetImage.width - 1 do
+            local pixelColor = targetImage:getPixel(x, y)
+            local c = Color(pixelColor)
+            
+            -- Check for magenta-range tracking pixels
+            if c.red > TRACKING_COLOR_MIN_RED and 
+               c.green < TRACKING_COLOR_MAX_GREEN and 
+               c.blue > TRACKING_COLOR_MIN_BLUE then
+                
+                -- Calculate grid cell information
+                local gridCol = math.floor(x / gridSize)
+                local gridRow = math.floor(y / gridSize)
+                local cellIndex = gridRow * gridCols + gridCol
+                
+                -- Calculate position relative to the cell
+                local cellX = x % gridSize
+                local cellY = y % gridSize
+                
+                -- Track this point
+                if not cellTrackingPoints[cellIndex] then
+                    cellTrackingPoints[cellIndex] = {}
+                end
+                
+                -- Add this tracking point
+                table.insert(cellTrackingPoints[cellIndex], {
+                    x = cellX,
+                    y = cellY,
+                    absolute = {x = x, y = y},
+                    color = c
+                })
+                
+                local dirText = ""
+                if directionInfo[cellIndex] then
+                    dirText = " (" .. directionInfo[cellIndex].directionName .. ")"
+                end
+                
+                print("Found tracking point in cell " .. cellIndex .. dirText .. 
+                      " at relative position (" .. cellX .. "," .. cellY .. ")")
+            end
+        end
+    end
+    
+    -- Count cells with tracking points
+    local cellsWithPoints = 0
+    for idx, points in pairs(cellTrackingPoints) do
+        if #points > 0 then
+            cellsWithPoints = cellsWithPoints + 1
+        end
+    end
+    
+    print("Found tracking points in " .. cellsWithPoints .. " cells")
+    
+    if cellsWithPoints == 0 then
+        app.alert("No tracking points found in any cells")
+        return false
+    end
+    
+    -- STEP 3: Identify source cells (first 4 cells with tracking points)
+    print("\n===== IDENTIFYING SOURCE CELLS =====")
+    
+    local sourceCells = {}  -- Maps direction to source cell data
+    
+    -- First, try to find source cells in the first state
+    for cellIndex = 0, 3 do
+        if cellTrackingPoints[cellIndex] and #cellTrackingPoints[cellIndex] > 0 then
+            -- Determine direction for this cell
+            local direction = cellIndex  -- Default to cell index
+            if directionInfo[cellIndex] then
+                direction = directionInfo[cellIndex].direction
+            end
+            
+            -- Get tracking point for this cell
+            local trackingPoint = nil
+            for _, tp in ipairs(cellTrackingPoints[cellIndex]) do
+                if not specificTrackingColor then
+                    trackingPoint = tp
+                    break
+                else
+                    -- Match specific color
+                    if math.abs(tp.color.red - specificTrackingColor.red) <= 5 and
+                       math.abs(tp.color.green - specificTrackingColor.green) <= 5 and
+                       math.abs(tp.color.blue - specificTrackingColor.blue) <= 5 then
+                        trackingPoint = tp
+                        break
+                    end
+                end
+            end
+            
+            if trackingPoint then
+                -- Calculate grid position
+                local gridCol = cellIndex % gridCols
+                local gridRow = math.floor(cellIndex / gridCols)
+                
+                print("Found source cell for direction " .. direction .. 
+                      " (" .. (directionInfo[cellIndex] and directionInfo[cellIndex].directionName or "Unknown") .. 
+                      ") at cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
+                      "] with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
+                
+                -- Store this source cell
+                sourceCells[direction] = {
+                    cellIndex = cellIndex,
+                    col = gridCol,
+                    row = gridRow,
+                    trackingPoint = trackingPoint,
+                    direction = direction,
+                    bounds = Rectangle(gridCol * gridSize, gridRow * gridSize, gridSize, gridSize)
+                }
+            end
+        end
+    end
+    
+    -- Count source cells
+    local sourceCount = 0
+    for _ in pairs(sourceCells) do
+        sourceCount = sourceCount + 1
+    end
+    
+    print("Found " .. sourceCount .. " usable source cells")
+    
+    if sourceCount == 0 then
+        app.alert("No usable source cells found")
+        return false
+    end
+    
+    -- STEP 4: Identify target cells (all cells with tracking points, including source cells)
+    print("\n===== IDENTIFYING TARGET CELLS =====")
+    
+    local targetCells = {}
+    
+    for cellIndex, points in pairs(cellTrackingPoints) do
+        -- Don't exclude source cells
+        
+        -- Ensure we have tracking points
+        if #points == 0 then
+            goto continue_target_scan
+        end
+        
+        -- Find appropriate tracking point
+        local trackingPoint = nil
+        for _, tp in ipairs(points) do
+            if not specificTrackingColor then
+                trackingPoint = tp
+                break
+            else
+                -- Match specific color
+                if math.abs(tp.color.red - specificTrackingColor.red) <= 5 and
+                   math.abs(tp.color.green - specificTrackingColor.green) <= 5 and
+                   math.abs(tp.color.blue - specificTrackingColor.blue) <= 5 then
+                    trackingPoint = tp
+                    break
+                end
+            end
+        end
+        
+        if not trackingPoint then
+            goto continue_target_scan
+        end
+        
+        -- Calculate cell position
+        local gridCol = cellIndex % gridCols
+        local gridRow = math.floor(cellIndex / gridCols)
+        
+        -- Determine direction
+        local direction = 0  -- Default to South (0)
+        local directionName = "South"
+        
+        if directionInfo[cellIndex] then
+            direction = directionInfo[cellIndex].direction
+            directionName = directionInfo[cellIndex].directionName
+        end
+        
+        -- Store target cell
+        table.insert(targetCells, {
+            cellIndex = cellIndex,
+            col = gridCol,
+            row = gridRow,
+            trackingPoint = trackingPoint,
+            direction = direction,
+            directionName = directionName,
+            bounds = Rectangle(gridCol * gridSize, gridRow * gridSize, gridSize, gridSize)
+        })
+        
+        print("Found target cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
+              "] for direction " .. direction .. " (" .. directionName .. 
+              ") with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
+        
+        ::continue_target_scan::
+    end
+    
+    print("Found " .. #targetCells .. " target cells")
+    
+    if #targetCells == 0 then
+        app.alert("No target cells found")
+        return false
+    end
+    
+    -- STEP 5: Apply overlays to target cells
+    print("\n===== APPLYING OVERLAYS TO TARGET CELLS =====")
+    
+    local successCount = 0
+    
+    app.transaction("Apply Overlays", function()
+        -- Create the destination layer if needed
+        local destLayer = nil
+        if createNewLayers then
+            local layerName = "Overlay"
+            
+            for _, layer in ipairs(sprite.layers) do
+                if layer.name == layerName then
+                    destLayer = layer
+                    break
+                end
+            end
+            
+            if not destLayer then
+                destLayer = sprite:newLayer()
+                destLayer.name = layerName
+                destLayer.opacity = 255
+            end
+        else
+            destLayer = overlayLayer
+        end
+        
+        -- Create a new image if we're creating a new layer, otherwise clone the existing one
+        local resultImage = nil
+        if createNewLayers then
+            resultImage = Image(sprite.width, sprite.height, sprite.colorMode)
+            resultImage:clear()
+        else
+            resultImage = overlayCel.image:clone()
+        end
+        
+        -- Process each target cell
+        for _, target in ipairs(targetCells) do
+            print("Processing target cell " .. target.cellIndex .. " [" .. target.col .. "," .. target.row .. 
+                  "] for direction " .. target.direction .. " (" .. target.directionName .. ")")
+            
+            -- Skip source cells unless specifically requested
+            local isSourceCell = false
+            for _, source in pairs(sourceCells) do
+                if source.cellIndex == target.cellIndex then
+                    isSourceCell = true
+                    break
+                end
+            end
+            
+            if isSourceCell and not applyToAll then
+                print("  Skipping source cell")
+                goto continue_apply
+            end
+            
+            -- Determine which source cell to use
+            local sourceInfo = nil
+            if respectDirections then
+                -- Try to find matching direction
+                sourceInfo = sourceCells[target.direction]
+                
+                -- If not found, try fallbacks
+                if not sourceInfo then
+                    -- For 8-direction sprites, map SE/SW/NE/NW to S/N/E/W
+                    if target.direction >= 4 and target.direction <= 7 and
+                       sourceCells[target.direction - 4] then
+                        sourceInfo = sourceCells[target.direction - 4]
+                        print("  Using fallback direction mapping: " .. target.direction .. 
+                              " -> " .. (target.direction - 4))
+                    else
+                        -- Default to South (0)
+                        sourceInfo = sourceCells[0]
+                        print("  Using default South direction as fallback")
+                    end
+                end
+            else
+                -- Just use South (0) or first available
+                sourceInfo = sourceCells[0]
+                if not sourceInfo then
+                    for _, src in pairs(sourceCells) do
+                        sourceInfo = src
+                        break
+                    end
+                end
+            end
+            
+            if not sourceInfo then
+                print("  No suitable source cell found")
+                goto continue_apply
+            end
+            
+            -- Calculate the shift between tracking points
+            local shiftX = target.trackingPoint.x - sourceInfo.trackingPoint.x
+            local shiftY = target.trackingPoint.y - sourceInfo.trackingPoint.y
+            
+            print("  Using source cell for direction " .. sourceInfo.direction .. 
+                  " with tracking point at (" .. sourceInfo.trackingPoint.x .. "," .. sourceInfo.trackingPoint.y .. ")")
+            print("  Target tracking point: (" .. target.trackingPoint.x .. "," .. target.trackingPoint.y .. ")")
+            print("  Shift to apply: (" .. shiftX .. "," .. shiftY .. ")")
+            
+            -- Clear the target area if not creating a new layer
+            if not createNewLayers then
+                for y = 0, gridSize - 1 do
+                    for x = 0, gridSize - 1 do
+                        local targetX = target.bounds.x + x
+                        local targetY = target.bounds.y + y
+                        
+                        if targetX < resultImage.width and targetY < resultImage.height then
+                            resultImage:putPixel(targetX, targetY, app.pixelColor.rgba(0, 0, 0, 0))
+                        end
+                    end
+                end
+            end
+            
+            -- Copy and shift overlay from source to target
+            for y = 0, gridSize - 1 do
+                for x = 0, gridSize - 1 do
+                    -- Calculate position on the canvas
+                    local canvasX = sourceInfo.bounds.x + x
+                    local canvasY = sourceInfo.bounds.y + y
+                    
+                    -- Convert to position relative to the overlay cel
+                    local srcX = canvasX - overlayCel.position.x
+                    local srcY = canvasY - overlayCel.position.y
+                    
+                    -- Skip if outside bounds
+                    if srcX < 0 or srcX >= overlayCel.image.width or srcY < 0 or srcY >= overlayCel.image.height then
+                        goto continue_pixel_copy
+                    end
+                    
+                    -- Get color at this position
+                    local color = overlayCel.image:getPixel(srcX, srcY)
+                    local c = Color(color)
+                    
+                    -- Skip tracking pixels and transparent pixels
+                    if c.alpha == 0 or (c.red > TRACKING_COLOR_MIN_RED and 
+                       c.green < TRACKING_COLOR_MAX_GREEN and 
+                       c.blue > TRACKING_COLOR_MIN_BLUE) then
+                        goto continue_pixel_copy
+                    end
+                    
+                    -- Calculate shifted position in target cell
+                    local targetX = target.bounds.x + x + shiftX
+                    local targetY = target.bounds.y + y + shiftY
+                    
+                    -- Ensure in bounds of the image
+                    if targetX >= 0 and targetX < resultImage.width and
+                       targetY >= 0 and targetY < resultImage.height then
+                        resultImage:putPixel(targetX, targetY, color)
+                    end
+                    
+                    ::continue_pixel_copy::
+                end
+            end
+            
+            successCount = successCount + 1
+            
+            ::continue_apply::
+        end
+        
+        -- Apply the final image
+        if createNewLayers then
+            sprite:newCel(destLayer, 1, resultImage, Point(0, 0))
+        else
+            overlayCel.image = resultImage
+        end
+    end)
+    
+    print("\n===== OVERLAY APPLICATION COMPLETE =====")
+    print("Successfully applied overlays to " .. successCount .. " target cells")
+    
+    if successCount > 0 then
+        app.alert("Successfully applied overlays to " .. successCount .. " cells")
+        return true
+    else
+        app.alert("Failed to apply any overlays")
+        return false
+    end
+end
+-- Helper function to get the first key from a table
+function list_first_key(t)
+    for k, _ in pairs(t) do
+        return k
+    end
+    return nil
+end
+-- Helper function to get the first key from a table
+function list_first_key(t)
+    for k, _ in pairs(t) do
+        return k
+    end
+    return nil
+end
 -- Dialog to manage tracking points
 function MDFunctions.showTrackingPointsDialog(sprite)
     local dlg = Dialog("Tracking Points Manager")
@@ -347,6 +991,14 @@ function MDFunctions.showTrackingPointsDialog(sprite)
     
     -- Apply overlay options
     dlg:separator { text = "Apply Overlays" }
+    dlg:button {
+        text = "Apply Layer as Overlay",
+        onclick = function()
+            dlg:close()
+            MDFunctions.showLayerOverlayDialog(sprite)
+        end
+    }
+    
     dlg:button {
         text = "Apply Overlay from File",
         onclick = function()
@@ -402,9 +1054,10 @@ function MDFunctions.showAddTrackingPointDialog(sprite)
                 dlg:close()
                 
                 -- Store the tracking color in global settings so the tool can use it
-                app.preferences.tool.fg = selectedColor
-                -- Switch to pencil tool
-                app.command.SwitchTool { tool="pencil" }
+                app.fgColor = selectedColor
+                
+                -- Switch to pencil tool - with correct command
+                app.activeTool = "pencil"
                 
                 app.alert {
                     title = "Add Tracking Point",
@@ -423,7 +1076,7 @@ function MDFunctions.showAddTrackingPointDialog(sprite)
 end
 
 -- Dialog to apply an overlay from a file
-function MDFunctions.showApplyOverlayDialog(targetSprite)
+function MDFunctions.showApplyOverlayDialog(sprite)
     local dlg = Dialog("Apply Overlay")
     
     dlg:file {
@@ -435,7 +1088,7 @@ function MDFunctions.showApplyOverlayDialog(targetSprite)
     
     -- Target layer selection
     local layerOptions = {}
-    for _, layer in ipairs(targetSprite.layers) do
+    for _, layer in ipairs(sprite.layers) do
         table.insert(layerOptions, layer.name)
     end
     
@@ -471,7 +1124,7 @@ function MDFunctions.showApplyOverlayDialog(targetSprite)
                 if overlaySprite then
                     -- Apply the overlay
                     local success = MDFunctions.applyOverlaysToAllFrames(
-                        targetSprite,
+                        sprite,
                         overlaySprite,
                         dlg.data.targetLayer,
                         dlg.data.allPoints and "" or nil  -- If allPoints is checked, don't filter
@@ -499,9 +1152,113 @@ function MDFunctions.showApplyOverlayDialog(targetSprite)
     dlg:button { id = "cancel", text = "Cancel" }
     dlg:show()
 end
--- Add this function to MDFunctions module
 
--- Add this function to MDFunctions module
+-- New function to handle frame sequence overlay applications
+function MDFunctions.showApplyOverlaySequenceDialog(sprite)
+    if not sprite then
+        app.alert("No sprite is currently open")
+        return
+    end
+    
+    local dlg = Dialog("Apply Overlay to Sequence")
+    
+    -- Get list of available layers
+    local layerOptions = {}
+    for _, layer in ipairs(sprite.layers) do
+        table.insert(layerOptions, layer.name)
+    end
+    
+    dlg:label { text = "This will apply an overlay to a sequence of frames" }
+    dlg:label { text = "based on tracking points in a reference frame." }
+    
+    dlg:separator()
+    
+    dlg:combobox {
+        id = "targetLayer",
+        label = "Target Layer:",
+        options = layerOptions,
+        option = layerOptions[1]
+    }
+    
+    dlg:number {
+        id = "refFrame",
+        label = "Reference Frame:",
+        text = "1",
+        decimals = 0,
+        min = 1,
+        max = #sprite.frames
+    }
+    
+    dlg:file {
+        id = "overlayFile",
+        label = "Overlay File:",
+        filetypes = { "aseprite", "ase", "png" },
+        open = true
+    }
+    
+    dlg:check {
+        id = "applyToAll",
+        label = "Apply to all frames",
+        selected = true
+    }
+    
+    dlg:button {
+        id = "ok",
+        text = "Apply",
+        onclick = function()
+            if not dlg.data.overlayFile or dlg.data.overlayFile == "" then
+                app.alert("Please select an overlay file")
+                return
+            end
+            
+            local refFrameNumber = math.max(1, math.min(dlg.data.refFrame, #sprite.frames))
+            local targetLayerName = dlg.data.targetLayer
+            
+            app.transaction("Apply Overlay Sequence", function()
+                -- Load overlay sprite
+                local overlaySprite = nil
+                local tempSprite = Sprite{ fromFile = dlg.data.overlayFile }
+                if tempSprite then
+                    overlaySprite = tempSprite
+                
+                    -- Apply to reference frame first
+                    local success = MDFunctions.applyOverlay(
+                        sprite,
+                        overlaySprite,
+                        refFrameNumber,
+                        targetLayerName,
+                        ""  -- No specific tracking point filter
+                    )
+                    
+                    -- If successful and apply to all frames is selected
+                    if success and dlg.data.applyToAll then
+                        -- Apply to other frames
+                        for i = 1, #sprite.frames do
+                            if i ~= refFrameNumber then
+                                MDFunctions.applyOverlay(
+                                    sprite,
+                                    overlaySprite,
+                                    i,
+                                    targetLayerName,
+                                    ""  -- No specific tracking point filter
+                                )
+                            end
+                        end
+                    end
+                    
+                    -- Clean up
+                    overlaySprite:close()
+                end
+            end)
+            
+            app.alert("Overlay application complete")
+            dlg:close()
+        end
+    }
+    
+    dlg:button { id = "cancel", text = "Cancel" }
+    dlg:show()
+end
 
 -- Create a new overlay template sprite with tracking points
 function MDFunctions.createOverlayTemplate()
@@ -770,7 +1527,6 @@ function MDFunctions.extractMetadataChunk(dmiPath)
     local ztxtChunk = fileData:sub(lengthStart, ztxtPos + 3 + chunkLength + 4)
     
     if ztxtChunk then
-        dbgMsg("Extracted " .. #ztxtChunk .. " bytes of raw chunk data")
         return ztxtChunk
     end
     
@@ -833,10 +1589,8 @@ function MDFunctions.saveSpritesheet(sprite, dmiPath)
     
     -- The native merge_spritesheet function should return a boolean success and optional error string
     if libdmi and libdmi.merge_spritesheet then
-        dbgMsg("Using native merge_spritesheet implementation")
         success, error = libdmi.merge_spritesheet(tempPath, origPath, dmiPath)
     else
-        dbgMsg("Falling back to Lua merge_spritesheet implementation")
         success = MDFunctions.fallbackMergeSpritesheet(tempPath, origPath, dmiPath)
     end
     
@@ -916,7 +1670,6 @@ function MDFunctions.getDmiMetadata(sprite)
     end
     
     if not app.fs.isFile(dmiPath) then
-        dbgMsg("Source DMI file not found")
         return nil
     end
     
@@ -935,7 +1688,6 @@ function MDFunctions.getDmiMetadata(sprite)
     -- Use the extension's existing functionality to open the DMI file and extract metadata
     local dmi, error = libdmi.open_file(dmiPath, tempDir)
     if error then
-        dbgMsg("Error opening DMI file: " .. error)
         if app.fs.isDirectory(tempDir) then
             libdmi.remove_dir(tempDir, true)
         end
@@ -1634,6 +2386,7 @@ end
 --- @param enable boolean Whether to enable or disable debug mode
 function MDFunctions.setDebugMode(enable)
     settings.debugMode = enable
+    MDFunctions.debugMode = enable
 end
 
 return MDFunctions
