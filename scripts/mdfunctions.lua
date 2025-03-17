@@ -549,7 +549,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     local cellTrackingPoints = {}  -- Indexed by cell index
     local targetImage = targetCel.image
     
-    -- Scan every pixel for tracking points
+    -- Scan every pixel for tracking points using canvas coordinates
     for y = 0, targetImage.height - 1 do
         for x = 0, targetImage.width - 1 do
             local pixelColor = targetImage:getPixel(x, y)
@@ -560,14 +560,23 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
                c.green < TRACKING_COLOR_MAX_GREEN and 
                c.blue > TRACKING_COLOR_MIN_BLUE then
                 
-                -- Calculate grid cell information
-                local gridCol = math.floor(x / gridSize)
-                local gridRow = math.floor(y / gridSize)
+                -- Canvas coordinates of this tracking pixel
+                local canvasX = x + targetCel.position.x
+                local canvasY = y + targetCel.position.y
+                
+                -- Map to grid cell using original grid dimensions
+                local gridCol = math.floor(canvasX / gridSize)
+                local gridRow = math.floor(canvasY / gridSize)
+                
+                -- Ensure within grid bounds
+                gridCol = math.min(math.max(gridCol, 0), gridCols - 1)
+                gridRow = math.min(math.max(gridRow, 0), gridRows - 1)
+                
                 local cellIndex = gridRow * gridCols + gridCol
                 
-                -- Calculate position relative to the cell
-                local cellX = x % gridSize
-                local cellY = y % gridSize
+                -- Calculate position relative to the cell's top-left corner
+                local cellX = canvasX - (gridCol * gridSize)
+                local cellY = canvasY - (gridRow * gridSize)
                 
                 -- Track this point
                 if not cellTrackingPoints[cellIndex] then
@@ -578,10 +587,11 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
                 table.insert(cellTrackingPoints[cellIndex], {
                     x = cellX,
                     y = cellY,
-                    absolute = {x = x, y = y},
+                    absolute = {x = canvasX, y = canvasY},
                     color = c
                 })
                 
+                -- Get direction information
                 local dirText = ""
                 if directionInfo[cellIndex] then
                     dirText = " (" .. directionInfo[cellIndex].directionName .. ")"
