@@ -1115,8 +1115,8 @@ function Editor:create_spritesheet()
     local height = math.ceil(total_frames / grid_size) * self.dmi.height
     
     -- Debug output
-    print("Creating spritesheet with dimensions: " .. width .. "x" .. height)
-    print("Total frames: " .. total_frames .. ", Grid size: " .. grid_size)
+    ---print("Creating spritesheet with dimensions: " .. width .. "x" .. height)
+    ---print("Total frames: " .. total_frames .. ", Grid size: " .. grid_size)
     
     -- Create a new sprite with all states
     local sprite = Sprite(ImageSpec {
@@ -1156,7 +1156,7 @@ function Editor:create_spritesheet()
         -- Draw all states to the composite image
         local index = 0
         for stateIdx, state in ipairs(self.dmi.states) do
-            print("Processing state " .. stateIdx .. ": " .. state.name .. " (" .. state.frame_count .. " frames, " .. state.dirs .. " dirs)")
+            ---print("Processing state " .. stateIdx .. ": " .. state.name .. " (" .. state.frame_count .. " frames, " .. state.dirs .. " dirs)")
             
             for frame = 0, state.frame_count - 1 do
                 for dir = 0, state.dirs - 1 do
@@ -1177,7 +1177,7 @@ function Editor:create_spritesheet()
                     local x = col * self.dmi.width
                     local y = row * self.dmi.height
                     
-                    print("Placing frame at position: " .. x .. "," .. y .. " (index: " .. index .. ", col: " .. col .. ", row: " .. row .. ")")
+                    ---print("Placing frame at position: " .. x .. "," .. y .. " (index: " .. index .. ", col: " .. col .. ", row: " .. row .. ")")
                     
                     -- Draw the cell image onto the composite image at the correct position
                     compositeImage:drawImage(cellImage, Point(x, y))
@@ -1297,7 +1297,7 @@ function Editor:apply_spritesheet_changes()
         -- Process each state
         local index = 0
         for stateIdx, state in ipairs(self.dmi.states) do
-            print("Extracting state " .. stateIdx .. ": " .. state.name)
+            ---print("Extracting state " .. stateIdx .. ": " .. state.name)
             
             -- For each frame and direction of this state
             for frame = 0, state.frame_count - 1 do

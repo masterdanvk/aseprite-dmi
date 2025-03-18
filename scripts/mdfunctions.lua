@@ -475,8 +475,8 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         return false
     end
     
-    print("===== STARTING OVERLAY COPY+SHIFT =====")
-    print("Sprite: " .. sprite.width .. "x" .. sprite.height .. " pixels")
+    ---print("===== STARTING OVERLAY COPY+SHIFT =====")
+    ---print("Sprite: " .. sprite.width .. "x" .. sprite.height .. " pixels")
     
     -- Determine grid cell size
     local gridSize = 32  -- Default for most DMI files
@@ -484,12 +484,12 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     if detectedSize then
         gridSize = detectedSize
     end
-    print("Using grid size: " .. gridSize .. "x" .. gridSize)
+    ---print("Using grid size: " .. gridSize .. "x" .. gridSize)
     
     -- Calculate grid dimensions
     local gridCols = sprite.width / gridSize
     local gridRows = sprite.height / gridSize
-    print("Grid dimensions: " .. gridCols .. "x" .. gridRows .. " cells")
+    ---print("Grid dimensions: " .. gridCols .. "x" .. gridRows .. " cells")
     
     -- Get cels for both layers
     local targetCel = targetLayer:cel(1)
@@ -510,12 +510,12 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         local endPos = sprite.data:find(";", start) or sprite.data:len() + 1
         local dmiPath = sprite.data:sub(start, endPos - 1)
         
-        print("Found DMI path: " .. dmiPath)
+        ---print("Found DMI path: " .. dmiPath)
         dmiMetadata = MDFunctions.getDmiMetadata(sprite)
     end
     
     if dmiMetadata and dmiMetadata.states and #dmiMetadata.states > 0 then
-        print("Successfully retrieved DMI metadata with " .. #dmiMetadata.states .. " states")
+        ---print("Successfully retrieved DMI metadata with " .. #dmiMetadata.states .. " states")
         
         -- Create a mapping of cell indices to directions
         local cellIndex = 0
@@ -544,7 +544,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     end
     
     -- STEP 2: Find all tracking points in the sprite
-    print("\n===== SCANNING FOR TRACKING POINTS =====")
+    ---print("\n===== SCANNING FOR TRACKING POINTS =====")
     
     local cellTrackingPoints = {}  -- Indexed by cell index
     local targetImage = targetCel.image
@@ -597,8 +597,8 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
                     dirText = " (" .. directionInfo[cellIndex].directionName .. ")"
                 end
                 
-                print("Found tracking point in cell " .. cellIndex .. dirText .. 
-                      " at relative position (" .. cellX .. "," .. cellY .. ")")
+                ---print("Found tracking point in cell " .. cellIndex .. dirText .. 
+                ---      " at relative position (" .. cellX .. "," .. cellY .. ")")
             end
         end
     end
@@ -611,7 +611,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         end
     end
     
-    print("Found tracking points in " .. cellsWithPoints .. " cells")
+    ---print("Found tracking points in " .. cellsWithPoints .. " cells")
     
     if cellsWithPoints == 0 then
         app.alert("No tracking points found in any cells")
@@ -619,7 +619,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     end
     
     -- STEP 3: Identify source cells (first 4 cells with tracking points)
-    print("\n===== IDENTIFYING SOURCE CELLS =====")
+    ---print("\n===== IDENTIFYING SOURCE CELLS =====")
     
     local sourceCells = {}  -- Maps direction to source cell data
     
@@ -654,10 +654,10 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
                 local gridCol = cellIndex % gridCols
                 local gridRow = math.floor(cellIndex / gridCols)
                 
-                print("Found source cell for direction " .. direction .. 
-                      " (" .. (directionInfo[cellIndex] and directionInfo[cellIndex].directionName or "Unknown") .. 
-                      ") at cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
-                      "] with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
+                ---print("Found source cell for direction " .. direction .. 
+                ---      " (" .. (directionInfo[cellIndex] and directionInfo[cellIndex].directionName or "Unknown") .. 
+                ---      ") at cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
+                ---      "] with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
                 
                 -- Store this source cell
                 sourceCells[direction] = {
@@ -678,7 +678,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         sourceCount = sourceCount + 1
     end
     
-    print("Found " .. sourceCount .. " usable source cells")
+    ---print("Found " .. sourceCount .. " usable source cells")
     
     if sourceCount == 0 then
         app.alert("No usable source cells found")
@@ -686,7 +686,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     end
     
     -- STEP 4: Identify target cells (all cells with tracking points, including source cells)
-    print("\n===== IDENTIFYING TARGET CELLS =====")
+    ---print("\n===== IDENTIFYING TARGET CELLS =====")
     
     local targetCells = {}
     
@@ -743,14 +743,14 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
             bounds = Rectangle(gridCol * gridSize, gridRow * gridSize, gridSize, gridSize)
         })
         
-        print("Found target cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
-              "] for direction " .. direction .. " (" .. directionName .. 
-              ") with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
+        ---print("Found target cell " .. cellIndex .. " [" .. gridCol .. "," .. gridRow .. 
+        ---      "] for direction " .. direction .. " (" .. directionName .. 
+        ---      ") with tracking point at (" .. trackingPoint.x .. "," .. trackingPoint.y .. ")")
         
         ::continue_target_scan::
     end
     
-    print("Found " .. #targetCells .. " target cells")
+    ---print("Found " .. #targetCells .. " target cells")
     
     if #targetCells == 0 then
         app.alert("No target cells found")
@@ -758,7 +758,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
     end
     
     -- STEP 5: Apply overlays to target cells
-    print("\n===== APPLYING OVERLAYS TO TARGET CELLS =====")
+    ---print("\n===== APPLYING OVERLAYS TO TARGET CELLS =====")
     
     local successCount = 0
     
@@ -795,8 +795,8 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         
         -- Process each target cell
         for _, target in ipairs(targetCells) do
-            print("Processing target cell " .. target.cellIndex .. " [" .. target.col .. "," .. target.row .. 
-                  "] for direction " .. target.direction .. " (" .. target.directionName .. ")")
+            ---print("Processing target cell " .. target.cellIndex .. " [" .. target.col .. "," .. target.row .. 
+            ---      "] for direction " .. target.direction .. " (" .. target.directionName .. ")")
             
             -- Skip source cells unless specifically requested
             local isSourceCell = false
@@ -808,7 +808,7 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
             end
             
             if isSourceCell and not applyToAll then
-                print("  Skipping source cell")
+                ---print("  Skipping source cell")
                 goto continue_apply
             end
             
@@ -824,12 +824,12 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
                     if target.direction >= 4 and target.direction <= 7 and
                        sourceCells[target.direction - 4] then
                         sourceInfo = sourceCells[target.direction - 4]
-                        print("  Using fallback direction mapping: " .. target.direction .. 
-                              " -> " .. (target.direction - 4))
+                        ---print("  Using fallback direction mapping: " .. target.direction .. 
+                        ---      " -> " .. (target.direction - 4))
                     else
                         -- Default to South (0)
                         sourceInfo = sourceCells[0]
-                        print("  Using default South direction as fallback")
+                        ---print("  Using default South direction as fallback")
                     end
                 end
             else
@@ -852,10 +852,10 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
             local shiftX = target.trackingPoint.x - sourceInfo.trackingPoint.x
             local shiftY = target.trackingPoint.y - sourceInfo.trackingPoint.y
             
-            print("  Using source cell for direction " .. sourceInfo.direction .. 
-                  " with tracking point at (" .. sourceInfo.trackingPoint.x .. "," .. sourceInfo.trackingPoint.y .. ")")
-            print("  Target tracking point: (" .. target.trackingPoint.x .. "," .. target.trackingPoint.y .. ")")
-            print("  Shift to apply: (" .. shiftX .. "," .. shiftY .. ")")
+            ---print("  Using source cell for direction " .. sourceInfo.direction .. 
+            ---      " with tracking point at (" .. sourceInfo.trackingPoint.x .. "," .. sourceInfo.trackingPoint.y .. ")")
+            ---print("  Target tracking point: (" .. target.trackingPoint.x .. "," .. target.trackingPoint.y .. ")")
+            ---print("  Shift to apply: (" .. shiftX .. "," .. shiftY .. ")")
             
             -- Clear the target area if not creating a new layer
             if not createNewLayers then
@@ -925,8 +925,8 @@ function MDFunctions.applyLayerAsOverlay(sprite, overlayLayer, targetLayer, sour
         end
     end)
     
-    print("\n===== OVERLAY APPLICATION COMPLETE =====")
-    print("Successfully applied overlays to " .. successCount .. " target cells")
+    ---print("\n===== OVERLAY APPLICATION COMPLETE =====")
+    ---print("Successfully applied overlays to " .. successCount .. " target cells")
     
     if successCount > 0 then
         app.alert("Successfully applied overlays to " .. successCount .. " cells")

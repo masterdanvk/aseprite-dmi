@@ -52,8 +52,8 @@ function init(plugin)
 after_listener = app.events:on("aftercommand", function(ev)
     if ev.name == "OpenFile" then
         -- Debug message to help troubleshoot
-        print("OpenFile event: " .. (app.sprite and app.sprite.filename or "No sprite") .. 
-              ", opening_dmi_noeditor: " .. tostring(_G.opening_dmi_noeditor or false))
+        ---print("OpenFile event: " .. (app.sprite and app.sprite.filename or "No sprite") .. 
+        ---      ", opening_dmi_noeditor: " .. tostring(_G.opening_dmi_noeditor or false))
         
         -- Skip DMI editor if coming from Raw Open command or Edit as Spritesheet
         if app.sprite and app.sprite.filename:ends_with(".dmi") and not (_G.opening_dmi_noeditor or false) then
