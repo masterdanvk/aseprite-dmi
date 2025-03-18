@@ -117,19 +117,11 @@ end)
 		end,
 	}
 
-	plugin:newCommand {
-		id = "dmi_raw_open",
-		title = "Open DMI (No Editor - Will Delete DMI Metadata!!)",
-		group = "dmi_editor",
-		onclick = function()
-			opening_dmi_noeditor = true
-			app.command.OpenFile()
-		end,
-	}
+
 
 	plugin:newCommand {
 		id = "dmi_open_spritesheet",
-		title = "Open DMI as Spritesheet",
+		title = "Open DMI (Maintain Metadata)",
 		group = "dmi_editor",
 		onclick = function()
 			opening_dmi_noeditor = true  -- Prevent regular DMI Editor from opening
@@ -137,6 +129,15 @@ end)
 		end,
 	}
 
+	plugin:newCommand {
+		id = "dmi_raw_open",
+		title = "Open DMI as PNG (No Editor - Will Delete DMI Metadata!!)",
+		group = "dmi_editor",
+		onclick = function()
+			opening_dmi_noeditor = true
+			app.command.OpenFile()
+		end,
+	}
 	plugin:newMenuSeparator {
 		group = "dmi_editor",
 	}

@@ -1463,9 +1463,29 @@ end
 
 --- Opens a DMI file as a spritesheet for direct editing
 --- @param editor Editor The DMI editor instance (optional)
---- @param dmiPath string The path to the DMI file
+--- @param dmiPath string The path to the DMI file (optional - will show dialog if not provided)
 --- @return Sprite|nil sprite The opened sprite, or nil if opening failed
 function MDFunctions.openAsSpritesheet(editor, dmiPath)
+    -- If no path provided, show a file dialog with .dmi files in the filter
+    if not dmiPath then
+        local dlg = Dialog("Open DMI as Spritesheet")
+        dlg:file{
+            id = "dmiFile",
+            label = "Select DMI File:",
+            filetypes = {"dmi", "png"},  -- Explicitly include DMI files
+            open = true
+        }
+        dlg:button{id = "ok", text = "Open"}
+        dlg:button{id = "cancel", text = "Cancel"}
+        dlg:show()
+        
+        if not dlg.data.ok or not dlg.data.dmiFile then
+            return nil  -- User cancelled or didn't select a file
+        end
+        
+        dmiPath = dlg.data.dmiFile
+    end
+    
     -- Attempt to open file directly as a sprite
     -- This will load it as a normal PNG file without special DMI handling
     if app.fs.isFile(dmiPath) then
@@ -1492,7 +1512,6 @@ function MDFunctions.openAsSpritesheet(editor, dmiPath)
     app.alert("Failed to open DMI file as spritesheet: " .. dmiPath)
     return nil
 end
-
 --- Extracts the zTXt metadata chunk from a DMI file
 --- @param dmiPath string Path to the DMI file
 --- @return string|nil metadata The extracted metadata chunk including length, type, data, and CRC
