@@ -2,18 +2,14 @@
 	"name": "asprite-dmi-MD",
 	"displayName": "DMI Editor MD Fork",
 	"description": "DMI Editor Extension for Aseprite with enhanced features for spritesheet editing",
-	"version": "1.2.2MD",
+	"version": "2.0.0MD",
 	"contributors": [
 		{
-			"name": "Seefaaa, Masterdan",
-			"url": "https://github.com/Seefaaa"
-		},
-		{
-			"name": "Space Station 13 Community",
-			"url": "https://github.com/spacestation13"
+			"name": "Masterdan",
+			"url": "https://github.com/masterdanvk"
 		}
 	],
-	"publisher": "Space Station 13 Community",
+	"publisher": "Masterdan",
 	"license": "GPL-3.0",
 	"categories": [ "Scripts" ],
 	"contributes": {

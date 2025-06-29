@@ -276,8 +276,8 @@ plugin:newCommand {
 }
 
 plugin:newCommand {
-    id = "dmi_apply_layer_overlay",
-    title = "Apply Layer as Overlay",
+    id = "dmi_automate_overlay_from_layer", -- Renamed ID
+    title = "Automate Overlay from Layer",    -- Renamed title
     group = "dmi_editor",
     onclick = function()
         if app.sprite then
@@ -366,17 +366,22 @@ function loadlib(plugin_path)
 			package.cpath = package.cpath .. ";?.dylib"
 		end
 		libdmi = package.loadlib(app.fs.joinPath(plugin_path, DMI_LIB), "luaopen_dmi_module")()
-		general_check()
+		-- Removed call to general_check() to disable update notifications
 	end
 end
 
+-- Removed general_check() function
+--[[
 --- General checks.
 function general_check()
 	if libdmi.check_update() then
 		update_popup()
 	end
 end
+]]
 
+-- Removed update_popup() function
+--[[
 --- Shows the update alert popup.
 function update_popup()
 	local dialog = Dialog {
@@ -420,3 +425,4 @@ function update_popup()
 
 	dialog:show()
 end
+]]
