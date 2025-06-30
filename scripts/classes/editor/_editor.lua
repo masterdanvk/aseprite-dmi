@@ -133,6 +133,7 @@ function Editor:toggle_view_mode()
     else
         -- Going from state mode to spritesheet mode
         -- Save any open state sprites
+        self:gc_open_sprites() -- Clean up list before checking
         for _, state_sprite in ipairs(self.open_sprites) do
             if state_sprite.sprite and state_sprite.sprite.isModified then
                 state_sprite:save()
@@ -147,7 +148,7 @@ function Editor:toggle_view_mode()
         -- Enter spritesheet mode
         self:enter_spritesheet_mode()
     else
-        -- Return to state mode - sprite cleanup already done above
+        -- Return to state mode
         self:exit_spritesheet_mode()
     end
 
@@ -158,24 +159,24 @@ function Editor:toggle_view_mode()
     }
 
     -- Update the view
-    self:repaint_states()
+    self:repaint()
 end
+
 --- Enter spritesheet editing mode
 function Editor:enter_spritesheet_mode()
     if not self.dmi then return end
 
     -- Create a spritesheet sprite from all the states
     self.spritesheet_sprite = self:create_spritesheet()
+    self:repaint()
 end
 
 --- Exit spritesheet editing mode and return to state view
 function Editor:exit_spritesheet_mode()
-    -- We already applied changes in toggle_view_mode
-    -- Here we just need to make sure we've cleaned up properly
-    if self.spritesheet_sprite then
+    if self.spritesheet_sprite and self.is_sprite_open(self.spritesheet_sprite) then
         self.spritesheet_sprite:close()
-        self.spritesheet_sprite = nil
     end
+    self.spritesheet_sprite = nil
 
     -- Update the state view
     self:repaint_states()
@@ -193,6 +194,7 @@ function Editor:open_file(dmi)
 		libdmi.remove_dir(self.dmi.temp, false)
 	end
 
+	self:gc_open_sprites()
 	for _, state_sprite in ipairs(self.open_sprites) do
 		state_sprite.sprite:close()
 	end
@@ -213,9 +215,9 @@ function Editor:open_file(dmi)
 	self:repaint()
 
 	if not dmi then
-		local dmi, error = libdmi.open_file(self.open_path, TEMP_DIR)
+		local dmi_data, error = libdmi.open_file(self.open_path, TEMP_DIR)
 		if not error then
-			self.dmi = dmi --[[@as Dmi]]
+			self.dmi = dmi_data --[[@as Dmi]]
 			self.image_cache:load_previews(self.dmi)
 		else
 			app.alert { title = "Error", text = { "Failed to open the DMI file", error } }
@@ -232,14 +234,9 @@ function Editor:open_file(dmi)
 end
 
 --- Saves the current DMI file.
---- If the DMI file is not set, the function returns without doing anything.
---- Displays a success or failure message using the Aseprite app.alert function.
---- @param no_dialog boolean|nil If true, skips the save dialog and overwrites the current file
---- @return boolean success Whether the DMI file has been saved. May still return true even if the file has not been saved successfully.
 function Editor:save(no_dialog)
 	if not self.dmi then return false end
 
-    -- If in spritesheet mode, apply changes back to states first
     if self.spritesheet_mode and self.spritesheet_sprite then
         self:apply_spritesheet_changes()
     end
@@ -265,10 +262,6 @@ function Editor:save(no_dialog)
 end
 
 --- Returns the path of the file to be saved.
---- If `save_path` is set, it returns that path.
---- Otherwise, if `open_path` is set, it returns that path.
---- If neither `save_path` nor `open_path` is set, it returns the path to a default file named "untitled.dmi" in the user's documents folder.
---- @return string path The path of the file to be saved.
 function Editor:path()
 	return self.save_path or self.open_path or app.fs.joinPath(app.fs.userDocsPath, "untitled.dmi")
 end
@@ -276,10 +269,10 @@ end
 --- @type string|nil
 local save_file_as = nil
 
---- This function is called before executing a command in the Aseprite editor. It checks the event name and performs specific actions based on the event type.
---- @param ev table The event object containing information about the event.
+--- This function is called before executing a command in the Aseprite editor.
 function Editor:onbeforecommand(ev)
 	if ev.name == "SaveFile" then
+        self:gc_open_sprites()
 		for _, state_sprite in ipairs(self.open_sprites) do
 			if app.sprite == state_sprite.sprite then
 				if not state_sprite:save() then
@@ -292,6 +285,7 @@ function Editor:onbeforecommand(ev)
 			end
 		end
 	elseif ev.name == "SaveFileAs" then
+        self:gc_open_sprites()
 		for _, state_sprite in ipairs(self.open_sprites) do
 			if app.sprite == state_sprite.sprite then
 				if save_file_as == nil then
@@ -303,7 +297,6 @@ function Editor:onbeforecommand(ev)
 end
 
 --- Callback function called after a Aseprite command is executed.
---- @param ev table The event object containing information about the command.
 function Editor:onaftercommand(ev)
 	if ev.name == "SaveFileAs" then
 		for i, state_sprite in ipairs(self.open_sprites) do
@@ -322,7 +315,8 @@ end
 function Editor:gc_open_sprites()
 	local open_sprites = {} --[[@type StateSprite[] ]]
 	for _, state_sprite in ipairs(self.open_sprites) do
-		if self.is_sprite_open(state_sprite.sprite) then
+        -- Ensure sprite is not nil before checking if it's open
+		if state_sprite.sprite and self.is_sprite_open(state_sprite.sprite) then
 			table.insert(open_sprites, state_sprite)
 		end
 	end
@@ -330,7 +324,6 @@ function Editor:gc_open_sprites()
 end
 
 --- Switches the tab to the sprite containing the state.
---- @param sprite Sprite The sprite to be opened.
 function Editor.switch_tab(sprite)
 	local tries = 0
 	local max_tries = #app.sprites + 1
@@ -341,10 +334,8 @@ function Editor.switch_tab(sprite)
 end
 
 --- Checks if the DMI file has been modified.
---- @return boolean modified Whether the DMI file has been modified.
 function Editor:is_modified()
-    -- ***** FIX: Clean up stale sprite references before checking them *****
-    self:gc_open_sprites()
+    self:gc_open_sprites() -- Clean up stale sprite references before checking them.
 
 	if self.modified then return true end
 
@@ -354,8 +345,7 @@ function Editor:is_modified()
 		end
 	end
 
-	-- Also check spritesheet modifications
-    if self.spritesheet_mode and self.spritesheet_sprite and self.spritesheet_sprite.isModified then
+    if self.spritesheet_mode and self.spritesheet_sprite and self.is_sprite_open(self.spritesheet_sprite) and self.spritesheet_sprite.isModified then
         return true
     end
 
@@ -363,8 +353,8 @@ function Editor:is_modified()
 end
 
 --- Checks if the sprite is open in the Aseprite editor.
---- @param sprite Sprite The sprite to be checked.
 function Editor.is_sprite_open(sprite)
+    if not sprite then return false end
 	for _, sprite_ in ipairs(app.sprites) do
 		if sprite == sprite_ then
 			return true
@@ -374,10 +364,6 @@ function Editor.is_sprite_open(sprite)
 end
 
 --- Function to handle the "onclose" event of the Editor class.
---- Cleans up resources and closes sprites when the editor is closed.
---- @param event boolean True if the event is triggered by the user closing the dialog, false otherwise.
---- @param force? boolean True if the editor should be closed without asking the user to save changes, false otherwise.
---- @return boolean closed Whether the editor has been closed.
 function Editor:close(event, force)
 	if self.closed then
 		return true
@@ -390,6 +376,7 @@ function Editor:close(event, force)
 			self.dialog:show { wait = false, bounds = bounds }
 		end
 
+        self:gc_open_sprites()
 		for _, state_sprite in ipairs(self.open_sprites) do
 			if state_sprite.sprite.isModified then
 				if state_sprite:save_warning() == 0 then
@@ -404,7 +391,7 @@ function Editor:close(event, force)
 	end
 
 	self.closed = true
-	self.dialog:close()
+	if self.dialog then self.dialog:close() end
 
 	for i, editor in ipairs(open_editors) do
 		if editor == self then
@@ -417,16 +404,15 @@ function Editor:close(event, force)
 		libdmi.remove_dir(self.dmi.temp, false)
 	end
 
+    self:gc_open_sprites()
 	for _, state_sprite in ipairs(self.open_sprites) do
 		if state_sprite.sprite then
 			state_sprite.sprite:close()
 		end
 	end
 
-	-- Clean up spritesheet resources if needed
-    if self.spritesheet_sprite then
+    if self.spritesheet_sprite and self.is_sprite_open(self.spritesheet_sprite) then
         self.spritesheet_sprite:close()
-        self.spritesheet_sprite = nil
     end
 
 	app.events:off(self.beforecommand)
@@ -445,7 +431,6 @@ function Editor:close(event, force)
 end
 
 --- Displays a warning dialog asking the user to save changes to the sprite before closing.
---- @return 0|1|2 result 0 if the user cancels the operation, 1 if the user saves the file, 2 if the user doesn't save the file.
 function Editor:save_warning()
 	local result = 0
 
@@ -497,22 +482,22 @@ function Editor:save_warning()
 	return result
 end
 
--- Completely removed grid layer creation and drawing from create_spritesheet
 function Editor:create_spritesheet()
     if not self.dmi then return nil end
 
-    -- Calculate total frames and grid size
     local total_frames = 0
     for _, state in ipairs(self.dmi.states) do
         total_frames = total_frames + (state.frame_count * state.dirs)
     end
 
-    -- Calculate grid dimensions for a roughly square arrangement
+    if total_frames == 0 then
+        return Sprite(self.dmi.width, self.dmi.height, ColorMode.RGB)
+    end
+
     local grid_size = math.ceil(math.sqrt(total_frames))
     local width = grid_size * self.dmi.width
     local height = math.ceil(total_frames / grid_size) * self.dmi.height
 
-    -- Create a new sprite with all states
     local sprite = Sprite(ImageSpec {
         width = width,
         height = height,
@@ -520,25 +505,12 @@ function Editor:create_spritesheet()
     })
 
     app.transaction("Create Spritesheet", function()
-        -- First, rename the default layer
-        if #sprite.layers > 0 then
-            sprite.layers[1].name = "States"
-        end
+        local mainLayer = sprite.layers[1] or sprite:newLayer()
+        mainLayer.name = "States"
 
-        -- If no layers exist, create the main layer
-        local mainLayer = nil
-        if #sprite.layers == 0 then
-            mainLayer = sprite:newLayer()
-            mainLayer.name = "States"
-        else
-            mainLayer = sprite.layers[1]
-        end
-
-        -- Create a single large image containing all cells properly positioned
         local compositeImage = Image(width, height, ColorMode.RGB)
-        compositeImage:clear() -- Make sure it's transparent
+        compositeImage:clear()
 
-        -- Draw all states to the composite image
         local index = 0
         for _, state in ipairs(self.dmi.states) do
             for frame = 0, state.frame_count - 1 do
@@ -546,32 +518,139 @@ function Editor:create_spritesheet()
                     local frame_index = frame * state.dirs + dir
                     local path = app.fs.joinPath(self.dmi.temp, state.frame_key .. "." .. frame_index .. ".bytes")
 
-                    -- Make sure the file exists
-                    if not app.fs.isFile(path) then
-                        goto continue
+                    if app.fs.isFile(path) then
+                        local cellImage = load_image_bytes(path)
+                        local col = index % grid_size
+                        local row = math.floor(index / grid_size)
+                        local x = col * self.dmi.width
+                        local y = row * self.dmi.height
+                        compositeImage:drawImage(cellImage, Point(x, y))
                     end
 
-                    local cellImage = load_image_bytes(path)
-
-                    -- Calculate position in grid
-                    local col = index % grid_size
-                    local row = math.floor(index / grid_size)
-                    local x = col * self.dmi.width
-                    local y = row * self.dmi.height
-
-                    -- Draw the cell image onto the composite image at the correct position
-                    compositeImage:drawImage(cellImage, Point(x, y))
-
                     index = index + 1
-                    ::continue::
                 end
             end
         end
 
-        -- Create a single cel with the composite image
         sprite:newCel(mainLayer, 1, compositeImage, Point(0, 0))
-
     end)
 
-    -- Save the sprite with metadata to indicate it's a DMI spritesheet
-    sprite.data = sprite.data .. ";dmi_
+    sprite.data = sprite.data .. ";dmi_spritesheet=true;dmi_source=" .. self:path() .. ";grid_size=" .. grid_size
+
+    local temp_path = app.fs.joinPath(app.fs.tempPath, TEMP_NAME, "spritesheet_temp.ase")
+    sprite:saveAs(temp_path)
+
+    if MDFunctions and MDFunctions.refreshDisplay then
+        MDFunctions.refreshDisplay(sprite)
+    end
+
+    app.command.FitScreen()
+
+    return sprite
+end
+
+function Editor:apply_spritesheet_changes()
+    if not self.dmi or not self.spritesheet_sprite or not self.is_sprite_open(self.spritesheet_sprite) then return end
+
+    local cellWidth = self.dmi.width
+    local cellHeight = self.dmi.height
+    local grid_size
+
+    if self.spritesheet_sprite.data and self.spritesheet_sprite.data:find("grid_size=") then
+        local start_pos = self.spritesheet_sprite.data:find("grid_size=") + 10
+        local end_pos = self.spritesheet_sprite.data:find(";", start_pos) or -1
+        grid_size = tonumber(self.spritesheet_sprite.data:sub(start_pos, end_pos))
+    end
+
+    if not grid_size then
+        local total_frames = 0
+        for _, state in ipairs(self.dmi.states) do
+            total_frames = total_frames + (state.frame_count * state.dirs)
+        end
+        grid_size = math.ceil(math.sqrt(total_frames))
+    end
+
+    app.transaction("Apply Spritesheet Changes", function()
+        local mainLayer
+        for _, l in ipairs(self.spritesheet_sprite.layers) do
+            if l.isVisible and (l.name == "States" or l.name == "Layer 1") then
+                mainLayer = l
+                break
+            end
+        end
+        if not mainLayer then return end
+
+        local cel = mainLayer:cel(app.activeFrame)
+        if not cel then return end
+        local fullImage = cel.image
+
+        local index = 0
+        for _, state in ipairs(self.dmi.states) do
+            for frame = 0, state.frame_count - 1 do
+                for dir = 0, state.dirs - 1 do
+                    local col = index % grid_size
+                    local row = math.floor(index / grid_size)
+                    local x = col * cellWidth
+                    local y = row * cellHeight
+
+                    if x < fullImage.width and y < fullImage.height then
+                        local cellImage = Image(cellWidth, cellHeight, fullImage.colorMode)
+                        cellImage:drawImage(fullImage, Point(0,0), Rectangle(x, y, cellWidth, cellHeight))
+                        
+                        local frameIndex = frame * state.dirs + dir
+                        local path = app.fs.joinPath(self.dmi.temp, state.frame_key .. "." .. frameIndex .. ".bytes")
+                        save_image_bytes(cellImage, path)
+
+                        if frame == 0 and dir == 0 then
+                            self.image_cache:set(state.frame_key, cellImage)
+                        end
+                    end
+                    index = index + 1
+                end
+            end
+        end
+        self.modified = true
+    end)
+    self:repaint_states()
+end
+
+function Editor:edit_spritesheet()
+    if not self.dmi then return end
+
+    if self:is_modified() then
+        local result = self:save_warning()
+        if result == 0 then return end
+    end
+
+    local dmiPath = self:path()
+    _G.opening_dmi_noeditor = true
+
+    self:close(false, true) -- Force close the editor UI
+
+    app.command.OpenFile { filename = dmiPath }
+    local sprite = app.sprite
+
+    if sprite then
+        if not sprite.data:find("dmi_spritesheet=true") then
+            sprite.data = (sprite.data or "") .. ";dmi_spritesheet=true;dmi_source=" .. dmiPath
+        end
+
+        for i = #sprite.layers, 1, -1 do
+            if sprite.layers[i].name == "Grid" then
+                sprite:deleteLayer(sprite.layers[i])
+            end
+        end
+
+        app.command.FitScreen()
+        app.alert {
+            title = "DMI Spritesheet Mode",
+            text = {
+                "You are now editing the entire DMI as a spritesheet.",
+                "When finished, use 'File > DMI Editor > Save Spritesheet as DMI'",
+                "to preserve all state metadata."
+            }
+        }
+    else
+        app.alert("Failed to open the DMI file as a spritesheet.")
+    end
+end
