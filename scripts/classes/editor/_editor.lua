@@ -132,7 +132,6 @@ function Editor:toggle_view_mode()
         end
     else
         -- Going from state mode to spritesheet mode
-        -- Save any open state sprites
         self:gc_open_sprites() -- Clean up list before checking
         for _, state_sprite in ipairs(self.open_sprites) do
             if state_sprite.sprite and state_sprite.sprite.isModified then
@@ -272,12 +271,28 @@ local save_file_as = nil
 --- This function is called before executing a command in the Aseprite editor.
 function Editor:onbeforecommand(ev)
 	if ev.name == "SaveFile" then
-        self:gc_open_sprites()
+		self:gc_open_sprites()
 		for _, state_sprite in ipairs(self.open_sprites) do
 			if app.sprite == state_sprite.sprite then
+
+                -- ***** START FIX: Cache and release selection *****
+                local cached_selection = nil
+                if app.range and not app.range.isEmpty then
+                    cached_selection = app.range
+                    app.command.DeselectMask()
+                end
+                -- ***** END FIX *****
+
 				if not state_sprite:save() then
 					ev.stopPropagation()
 				end
+
+                -- ***** START FIX: Restore selection *****
+                if cached_selection then
+                    app.range = cached_selection
+                end
+                -- ***** END FIX *****
+
 				if Preferences.getAutoOverwrite and Preferences.getAutoOverwrite() then
 					self:save(true)
 				end
