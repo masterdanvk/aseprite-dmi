@@ -291,6 +291,79 @@ plugin:newCommand {
         return app.sprite ~= nil
     end,
 }
+
+	plugin:newMenuSeparator {
+		group = "dmi_editor",
+	}
+
+	plugin:newCommand {
+		id = "dmi_new_autotile_template",
+		title = "New Autotile Template",
+		group = "dmi_editor",
+		onclick = function()
+			local dlg = Dialog("New Autotile Template")
+			dlg:number {
+				id = "tilesize",
+				label = "Tile Size (must be even):",
+				text = "32",
+				decimals = 0,
+			}
+			dlg:button { id = "ok", text = "OK" }
+			dlg:button { id = "cancel", text = "Cancel" }
+			dlg:show()
+
+			if dlg.data.ok then
+				local tileSize = dlg.data.tilesize
+				if tileSize < 8 or tileSize % 2 ~= 0 then
+					app.alert("Tile size must be an even number >= 8")
+					return
+				end
+				Autotile.newTemplate(tileSize, plugin.path)
+			end
+		end,
+	}
+
+	plugin:newCommand {
+		id = "dmi_export_autotile",
+		title = "Export Autotile as DMI",
+		group = "dmi_editor",
+		onclick = function()
+			if not app.sprite then
+				app.alert("No sprite is currently open")
+				return
+			end
+
+			local tileSize = Autotile.detectTileSize(app.sprite)
+			if not tileSize then
+				app.alert("Current sprite does not appear to be an autotile template.\n\n" ..
+					"Expected: 3N × 4N dimensions where N is an even tile size.")
+				return
+			end
+
+			loadlib(plugin.path)
+
+			local defaultName = app.fs.fileTitle(app.sprite.filename)
+			if defaultName == "" then defaultName = "autotile" end
+
+			local defaultDir = app.fs.filePath(app.sprite.filename)
+			if defaultDir == "" then defaultDir = app.fs.userDocsPath end
+
+			local outputPath = libdmi.save_dialog(
+				"Export Autotile as DMI",
+				defaultName .. ".dmi",
+				defaultDir
+			)
+
+			if outputPath and outputPath ~= "" then
+				local dmiName = app.fs.fileTitle(outputPath)
+				Autotile.exportDMI(app.sprite, outputPath, plugin.path, dmiName)
+			end
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
+		end,
+	}
+
 	plugin:newMenuSeparator {
 		group = "dmi_editor",
 	}
