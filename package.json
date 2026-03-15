@@ -25,6 +25,9 @@
 			{ "path": "./scripts/functions/string.lua" },
 			{ "path": "./scripts/functions/table.lua" },
 			{ "path": "./scripts/functions/autotile.lua" },
+			{ "path": "./scripts/functions/luatransform.lua" },
+			{ "path": "./scripts/functions/components.lua" },
+			{ "path": "./scripts/functions/poseeditor.lua" },
 			{ "path": "./scripts/constants.lua" },
 			{ "path": "./scripts/mdfunctions.lua" },
 			{ "path": "./scripts/main.lua" }

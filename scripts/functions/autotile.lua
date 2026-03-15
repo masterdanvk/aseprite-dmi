@@ -139,7 +139,7 @@ local function saveImageAsBytes(image, path)
 
     local w = image.width
     local h = image.height
-    local header = tostring(w) .. "\n" .. tostring(h) .. "\n"
+    local header = string.format("%d\n%d\n", w, h)
     f:write(header)
 
     -- Write RGBA pixel data in row-major order.
@@ -586,17 +586,18 @@ function Autotile.exportDMI(sprite, outputPath, pluginPath, dmiName)
         temp = tempDir,
     }
 
-    local ok, err = pcall(function()
-        libdmi.save_file(dmiTable, outputPath)
-    end)
+    -- Note: libdmi functions use safe!() wrapper and never throw.
+    -- They return (result, error_string) instead.
+    local result, saveErr = libdmi.save_file(dmiTable, outputPath)
 
     -- Clean up temp directory
-    pcall(function()
-        libdmi.remove_dir(tempDir, false)
-    end)
+    local _, cleanErr = libdmi.remove_dir(tempDir, false)
+    if cleanErr then
+        print("[Autotile] cleanup warning: " .. cleanErr)
+    end
 
-    if not ok then
-        app.alert("Failed to save DMI: " .. tostring(err))
+    if saveErr then
+        app.alert("Failed to save DMI:\n" .. tostring(saveErr))
         return false
     end
 

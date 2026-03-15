@@ -369,6 +369,50 @@ plugin:newCommand {
 	}
 
 	plugin:newCommand {
+		id = "dmi_new_component_sheet",
+		title = "New Component Sheet",
+		group = "dmi_editor",
+		onclick = function()
+			Components.showNewSchemaDialog()
+		end,
+	}
+
+	plugin:newCommand {
+		id = "dmi_edit_component_sheet",
+		title = "Edit Component Sheet",
+		group = "dmi_editor",
+		onclick = function()
+			Components.showEditSheetDialog()
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
+		end,
+	}
+
+	plugin:newCommand {
+		id = "dmi_pose_editor",
+		title = "Pose Editor",
+		group = "dmi_editor",
+		onclick = function()
+			if not app.sprite then
+				app.alert("No sprite is currently open")
+				return
+			end
+			local editor = PoseEditor.new(app.sprite)
+			if editor then
+				editor:show(plugin.path)
+			end
+		end,
+		onenabled = function()
+			return app.sprite ~= nil
+		end,
+	}
+
+	plugin:newMenuSeparator {
+		group = "dmi_editor",
+	}
+
+	plugin:newCommand {
 		id = "dmi_preferences",
 		title = "Preferences",
 		group = "dmi_editor",
