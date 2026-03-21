@@ -219,24 +219,44 @@ function PoseEditor:reconcilePoses()
     for _, stateData in pairs(self.poses) do
         -- ── layer_order: add new, prune removed ──
         if stateData.layer_order then
-            local orderSet = {}
-            for _, n in ipairs(stateData.layer_order) do
-                orderSet[n] = true
-            end
-            -- Append new components that aren't in layer_order yet
-            for _, n in ipairs(self.componentNames) do
-                if not orderSet[n] then
-                    table.insert(stateData.layer_order, n)
+            -- Migrate old flat array to per-dir format
+            if #stateData.layer_order > 0 and type(stateData.layer_order[1]) == "string" then
+                local flat = {}
+                for i, n in ipairs(stateData.layer_order) do flat[i] = n end
+                stateData.layer_order = {}
+                for _, d in ipairs(allDirs) do
+                    stateData.layer_order[d] = {}
+                    for i, n in ipairs(flat) do stateData.layer_order[d][i] = n end
                 end
             end
-            -- Remove components no longer in schema
-            local cleaned = {}
-            for _, n in ipairs(stateData.layer_order) do
-                if nameSet[n] then
-                    table.insert(cleaned, n)
+            -- Reconcile each direction's order
+            for _, d in ipairs(allDirs) do
+                if not stateData.layer_order[d] then
+                    stateData.layer_order[d] = {}
+                    for i, n in ipairs(self.componentNames) do
+                        stateData.layer_order[d][i] = n
+                    end
+                else
+                    local orderSet = {}
+                    for _, n in ipairs(stateData.layer_order[d]) do
+                        orderSet[n] = true
+                    end
+                    -- Append new components that aren't in layer_order yet
+                    for _, n in ipairs(self.componentNames) do
+                        if not orderSet[n] then
+                            table.insert(stateData.layer_order[d], n)
+                        end
+                    end
+                    -- Remove components no longer in schema
+                    local cleaned = {}
+                    for _, n in ipairs(stateData.layer_order[d]) do
+                        if nameSet[n] then
+                            table.insert(cleaned, n)
+                        end
+                    end
+                    stateData.layer_order[d] = cleaned
                 end
             end
-            stateData.layer_order = cleaned
         end
 
         -- ── frames: ensure every dir/comp has a transform ──
@@ -302,15 +322,22 @@ end
 function PoseEditor:addState(name, dirCount)
     if self.poses[name] then return end
     -- layer_order controls draw order: first = back, last = front
+    -- Per-direction: { south = {...}, north = {...}, east = {...}, west = {...} }
     -- Copy from blank state template if it exists, otherwise use default
+    local allDirs = { "south", "north", "east", "west" }
     local order = {}
-    if name ~= "" and self.poses[""] and self.poses[""].layer_order then
-        for i, n in ipairs(self.poses[""].layer_order) do
-            order[i] = n
-        end
-    else
-        for i, comp in ipairs(self.componentNames) do
-            order[i] = comp
+    for _, d in ipairs(allDirs) do
+        order[d] = {}
+        local srcOrder = name ~= "" and self.poses[""] and self.poses[""].layer_order
+            and self.poses[""].layer_order[d]
+        if srcOrder and #srcOrder > 0 then
+            for i, n in ipairs(srcOrder) do
+                order[d][i] = n
+            end
+        else
+            for i, comp in ipairs(self.componentNames) do
+                order[d][i] = comp
+            end
         end
     end
 
@@ -708,13 +735,22 @@ function PoseEditor:setTransform(compName, transform)
     self.previewDirty = true
 end
 
---- Get the layer order for the current state.
+--- Get the layer order for the current state and direction.
 --- Returns an array of component names from back to front.
+--- @param dir string|nil Direction to look up (defaults to self.currentDir)
 --- @return string[]
-function PoseEditor:getLayerOrder()
+function PoseEditor:getLayerOrder(dir)
+    dir = dir or self.currentDir
     local state = self.poses[self.currentState]
-    if state and state.layer_order and #state.layer_order > 0 then
-        return state.layer_order
+    if state and state.layer_order then
+        -- Per-direction layer order (new format)
+        if state.layer_order[dir] and #state.layer_order[dir] > 0 then
+            return state.layer_order[dir]
+        end
+        -- Backward compat: flat array (old format) — treat as all-dir
+        if #state.layer_order > 0 and type(state.layer_order[1]) == "string" then
+            return state.layer_order
+        end
     end
     return self.componentNames
 end
@@ -723,7 +759,8 @@ end
 function PoseEditor:layerMoveUp()
     local state = self.poses[self.currentState]
     if not state or not state.layer_order then return end
-    local order = state.layer_order
+    local order = state.layer_order[self.currentDir]
+    if not order then return end
     for i, name in ipairs(order) do
         if name == self.selectedComponent and i < #order then
             order[i], order[i + 1] = order[i + 1], order[i]
@@ -737,7 +774,8 @@ end
 function PoseEditor:layerMoveDown()
     local state = self.poses[self.currentState]
     if not state or not state.layer_order then return end
-    local order = state.layer_order
+    local order = state.layer_order[self.currentDir]
+    if not order then return end
     for i, name in ipairs(order) do
         if name == self.selectedComponent and i > 1 then
             order[i], order[i - 1] = order[i - 1], order[i]
@@ -755,7 +793,6 @@ end
 function PoseEditor:composeFrame(frameIdx)
     local ts = self.schema.tile_size
     local composite = Image(ts, ts, ColorMode.RGB)
-    local layerOrder = self:getLayerOrder()
 
     local state = self.poses[self.currentState]
     if not state then return composite end
@@ -770,6 +807,7 @@ function PoseEditor:composeFrame(frameIdx)
     if dir == "west" and autoMirrorWest then
         -- Post-composite mirror: compose east normally, then flip the whole image.
         -- This correctly handles all transforms (scale, rotation, etc.)
+        local layerOrder = self:getLayerOrder("east")
         for _, compName in ipairs(layerOrder) do
             local eastData = frame["east"]
             if not eastData or not eastData[compName] then goto continue_mirror end
@@ -801,6 +839,7 @@ function PoseEditor:composeFrame(frameIdx)
         -- Flip the entire composed east image to produce the west mirror
         composite = LuaTransform.flipH(composite)
     else
+        local layerOrder = self:getLayerOrder(dir)
         for _, compName in ipairs(layerOrder) do
             local dirData = frame[dir]
             local transform = dirData and dirData[compName] or defaultTransform()
@@ -968,15 +1007,8 @@ local function onCanvasPaint(self, gc)
         gc:fillRect(Rectangle(0, 0, size, size))
     end
 
-    -- 2) Reference background (loaded DMI frame at 30% opacity)
-    --    In showRefFull mode, we skip this here and draw it on top later.
-    if not self.showRefFull then
-        local refImg = self:getReferenceImage()
-        if refImg then
-            local zoomedRef = LuaTransform.scale(refImg, size, size)
-            gc:drawImage(zoomedRef, zoomedRef.bounds, Rectangle(0, 0, size, size))
-        end
-    end
+    -- 2) Reference background — now drawn AFTER compose (step 4) so it's
+    --    visible as an overlay.  Skipped here; see step 4c below.
 
     -- 3) Onion skin ghost (previous frame, or base pose on frame 1)
     if self.showOnionSkin and not self.showRefFull then
@@ -999,6 +1031,17 @@ local function onCanvasPaint(self, gc)
 
     -- 4b) In showRefFull mode, draw the reference at 100% on top
     if self.showRefFull then
+        local refImg = self:getReferenceImage()
+        if refImg then
+            local zoomedRef = LuaTransform.scale(refImg, size, size)
+            gc:drawImage(zoomedRef, zoomedRef.bounds, Rectangle(0, 0, size, size))
+        end
+    end
+
+    -- 4c) Reference overlay (semi-transparent, drawn OVER the compose so
+    --     it's visible and clearly tracks the current frame).
+    --     Controlled by the onion skin toggle.
+    if not self.showRefFull and self.showOnionSkin then
         local refImg = self:getReferenceImage()
         if refImg then
             local zoomedRef = LuaTransform.scale(refImg, size, size)
@@ -1085,6 +1128,13 @@ local function hitTest(self, tileX, tileY)
         local variant = transform.variant or "default"
         local artDir = self.currentDir
 
+        -- For auto-mirror west, fetch east art
+        local autoMirrorWest = self.schema.auto_mirror_west
+            and not (self.poses[self.currentState] and self.poses[self.currentState].own_west)
+        if artDir == "west" and autoMirrorWest then
+            artDir = "east"
+        end
+
         local srcImage = self.componentImages[compName]
             and self.componentImages[compName][variant]
             and self.componentImages[compName][variant][artDir]
@@ -1096,20 +1146,17 @@ local function hitTest(self, tileX, tileY)
         end
 
         if srcImage then
+            -- Apply the full transform pipeline so hit-testing accounts for
+            -- flips, rotation, and scale — not just the raw source bounds.
+            local transformed = LuaTransform.transform(srcImage, transform, false)
             local ox = transform.x or 0
             local oy = transform.y or 0
-            local sx = transform.scale_x or 1.0
-            local sy = transform.scale_y or 1.0
-            local scaledW = math.max(1, math.floor(srcImage.width * math.abs(sx)))
-            local scaledH = math.max(1, math.floor(srcImage.height * math.abs(sy)))
             local localX = tileX - ox
             local localY = tileY - oy
 
-            if localX >= 0 and localX < scaledW and localY >= 0 and localY < scaledH then
-                -- Map back to source pixel for alpha check
-                local srcX = math.min(math.floor(localX * srcImage.width / scaledW), srcImage.width - 1)
-                local srcY = math.min(math.floor(localY * srcImage.height / scaledH), srcImage.height - 1)
-                local pv = srcImage:getPixel(srcX, srcY)
+            if localX >= 0 and localX < transformed.width
+                and localY >= 0 and localY < transformed.height then
+                local pv = transformed:getPixel(localX, localY)
                 local a = (pv >> 24) & 0xFF
                 if a > 10 then
                     return compName
@@ -1190,6 +1237,15 @@ local function updateControls(self)
 
     -- Part combobox
     self.dialog:modify { id = "component_select", option = self.selectedComponent or "?" }
+
+    -- Variant button
+    local curVariant = t.variant or "default"
+    local variants = Components.getVariants(self.schema, self.selectedComponent)
+    if #variants > 1 then
+        self.dialog:modify { id = "variant_btn", text = "V:" .. curVariant, enabled = true }
+    else
+        self.dialog:modify { id = "variant_btn", text = "V:" .. curVariant, enabled = false }
+    end
 
     -- Frame display
     local frameCount = state and #state.frames or 1
@@ -1309,12 +1365,19 @@ local function exportDMI(self, outputPath, pluginPath)
             for dirIdx, dir in ipairs(stateExportDirs) do
                 -- Compose this frame using manual pixel blitting for safety
                 local composite = Image(ts, ts, ColorMode.RGB)
-                local layerOrder = stateData.layer_order or self.componentNames
 
                 -- For west auto-mirror: compose east normally, then flip the whole image
                 local composeDir = dir
                 if dir == "west" and autoMirror then
                     composeDir = "east"
+                end
+
+                -- Per-dir layer order with fallback
+                local layerOrder
+                if stateData.layer_order and stateData.layer_order[composeDir] then
+                    layerOrder = stateData.layer_order[composeDir]
+                else
+                    layerOrder = self.componentNames
                 end
 
                 for _, compName in ipairs(layerOrder) do
@@ -1348,7 +1411,8 @@ local function exportDMI(self, outputPath, pluginPath)
                         -- Apply transforms (no highQuality - pixel art doesn't need it)
                         local transformed = LuaTransform.transform(srcImage, transform, false)
 
-                        -- Safe pixel-level blit into composite (bounds-checked)
+                        -- Alpha-blended blit into composite (bounds-checked)
+                        -- Uses proper alpha compositing so layers stack correctly
                         local ox = transform.x or 0
                         local oy = transform.y or 0
                         for py = 0, transformed.height - 1 do
@@ -1356,10 +1420,33 @@ local function exportDMI(self, outputPath, pluginPath)
                                 local cx = ox + px
                                 local cy = oy + py
                                 if cx >= 0 and cx < ts and cy >= 0 and cy < ts then
-                                    local pv = transformed:getPixel(px, py)
-                                    local a = (pv >> 24) & 0xFF
-                                    if a > 0 then
-                                        composite:drawPixel(cx, cy, pv)
+                                    local srcPv = transformed:getPixel(px, py)
+                                    local srcA = (srcPv >> 24) & 0xFF
+                                    if srcA > 0 then
+                                        local dstPv = composite:getPixel(cx, cy)
+                                        local dstA = (dstPv >> 24) & 0xFF
+                                        if dstA == 0 then
+                                            -- Nothing underneath, just place the pixel
+                                            composite:drawPixel(cx, cy, srcPv)
+                                        else
+                                            -- Alpha-blend: src over dst
+                                            local srcR = srcPv & 0xFF
+                                            local srcG = (srcPv >> 8) & 0xFF
+                                            local srcB = (srcPv >> 16) & 0xFF
+                                            local dstR = dstPv & 0xFF
+                                            local dstG = (dstPv >> 8) & 0xFF
+                                            local dstB = (dstPv >> 16) & 0xFF
+                                            local outA = srcA + dstA * (255 - srcA) / 255
+                                            local outR = (srcR * srcA + dstR * dstA * (255 - srcA) / 255) / outA
+                                            local outG = (srcG * srcA + dstG * dstA * (255 - srcA) / 255) / outA
+                                            local outB = (srcB * srcA + dstB * dstA * (255 - srcA) / 255) / outA
+                                            composite:drawPixel(cx, cy, app.pixelColor.rgba(
+                                                math.floor(outR + 0.5),
+                                                math.floor(outG + 0.5),
+                                                math.floor(outB + 0.5),
+                                                math.floor(outA + 0.5)
+                                            ))
+                                        end
                                     end
                                 end
                             end
@@ -1939,6 +2026,29 @@ function PoseEditor:show(pluginPath)
         end,
     }
 
+    dlg:button {
+        id = "variant_btn",
+        text = "V:default",
+        onclick = function()
+            if not self_ref.selectedComponent then return end
+            local variants = Components.getVariants(self_ref.schema, self_ref.selectedComponent)
+            if #variants <= 1 then return end -- nothing to cycle
+            local t = self_ref:getTransform(self_ref.selectedComponent)
+            local cur = t.variant or "default"
+            -- Find current index and advance to next
+            local curIdx = 1
+            for i, v in ipairs(variants) do
+                if v == cur then curIdx = i; break end
+            end
+            local nextIdx = (curIdx % #variants) + 1
+            t.variant = variants[nextIdx]
+            self_ref:setTransform(self_ref.selectedComponent, t)
+            self_ref.previewDirty = true
+            updateControls(self_ref)
+            dlg:repaint()
+        end,
+    }
+
     -- ROW 4: Layer + rotation (buttons → one row)
 
     dlg:button {
@@ -2302,11 +2412,14 @@ function PoseEditor:show(pluginPath)
                             end
                         end
                     end
-                    -- Copy layer order
+                    -- Copy layer order (per-direction)
                     if srcOrder then
                         stateData.layer_order = {}
-                        for i, name in ipairs(srcOrder) do
-                            stateData.layer_order[i] = name
+                        for d, dirOrder in pairs(srcOrder) do
+                            stateData.layer_order[d] = {}
+                            for i, name in ipairs(dirOrder) do
+                                stateData.layer_order[d][i] = name
+                            end
                         end
                     end
                 end

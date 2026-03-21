@@ -587,10 +587,29 @@ function Components.readData(sprite)
                         data.poses[stateName].delays[i] = stateData.delays[i]
                     end
                 end
-                -- Copy layer_order if present
+                -- Copy layer_order if present (per-direction or flat)
                 if stateData.layer_order then
-                    for i = 1, #stateData.layer_order do
-                        data.poses[stateName].layer_order[i] = stateData.layer_order[i]
+                    if type(stateData.layer_order[1]) == "string" then
+                        -- Old flat format → migrate to per-dir
+                        local flat = {}
+                        for i = 1, #stateData.layer_order do flat[i] = stateData.layer_order[i] end
+                        local dirs = { "south", "north", "east", "west" }
+                        data.poses[stateName].layer_order = {}
+                        for _, d in ipairs(dirs) do
+                            data.poses[stateName].layer_order[d] = {}
+                            for i, n in ipairs(flat) do
+                                data.poses[stateName].layer_order[d][i] = n
+                            end
+                        end
+                    else
+                        -- Per-direction format
+                        data.poses[stateName].layer_order = {}
+                        for d, dirOrder in pairs(stateData.layer_order) do
+                            data.poses[stateName].layer_order[d] = {}
+                            for i = 1, #dirOrder do
+                                data.poses[stateName].layer_order[d][i] = dirOrder[i]
+                            end
+                        end
                     end
                 end
                 if stateData.frames then
